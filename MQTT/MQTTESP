@@ -1,0 +1,70 @@
+import paho.mqtt.client as mqtt
+
+# ===========================
+# CONFIGURAÇÕES
+# ===========================
+BROKER = "broker.emqx.io"     # ou localhost
+PORT = 1883
+
+USERNAME = "admin@aeroclub.com"                 # deixe vazio se não usar
+PASSWORD = "admin@aeroclub.com"                 # deixe vazio se não usar
+
+TOPICO = "aeroclube/+/cmd"
+
+# ===========================
+# CALLBACKS
+# ===========================
+
+def on_connect(client, userdata, flags, reason_code, properties=None):
+    if reason_code == 0:
+        print("===================================")
+        print("Conectado ao Broker MQTT")
+        print("===================================")
+
+        client.subscribe(TOPICO)
+
+        print(f"Escutando tópico: {TOPICO}\n")
+
+    else:
+        print("Erro ao conectar:", reason_code)
+
+
+def on_message(client, userdata, msg):
+
+    payload = msg.payload.decode()
+
+    print("-----------------------------------")
+    print("Tópico :", msg.topic)
+    print("Mensagem:", payload)
+    print("-----------------------------------")
+
+    # Simula o ESP respondendo
+    if payload in ["BalOn", "BalOff"]:
+
+        status_topic = msg.topic.replace("/cmd", "/status")
+
+        client.publish(status_topic, "Recebido")
+
+        print("ACK enviado para:")
+        print(status_topic)
+        print()
+
+
+# ===========================
+# MQTT
+# ===========================
+
+client = mqtt.Client(
+    mqtt.CallbackAPIVersion.VERSION2,
+    client_id="SimuladorBalizador"
+)
+
+if USERNAME:
+    client.username_pw_set(USERNAME, PASSWORD)
+
+client.on_connect = on_connect
+client.on_message = on_message
+
+client.connect(BROKER, PORT)
+
+client.loop_forever()

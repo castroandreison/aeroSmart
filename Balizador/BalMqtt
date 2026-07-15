@@ -1,0 +1,150 @@
+import json
+import threading
+import time
+from datetime import datetime, timedelta
+
+import paho.mqtt.client as mqtt
+
+# =====================================================
+# CONFIGURAÇÃO MQTT
+# =====================================================
+broker_address = "broker.emqx.io"
+read_topic = "Bal/Write/AeroClub Central"
+write_topic = "Bal/Read/AeroClub Central"
+
+
+def horario():
+    return datetime.now().strftime("%d/%m/%Y %H:%M:%S.%f")[:-3]
+
+
+# =====================================================
+# TIMER DO AGENDAMENTO
+# =====================================================
+def timer_agendamento(duracao_minutos):
+    termino = datetime.now() + timedelta(minutes=duracao_minutos)
+
+    print(f"\n[{horario()}] Iniciando contagem regressiva ({duracao_minutos} minuto(s))")
+
+    while True:
+        restante = termino - datetime.now()
+
+        if restante.total_seconds() <= 0:
+            print(f"\r[{horario()}] Tempo restante: 00:00")
+            print(f"[{horario()}] >>> AGENDAMENTO FINALIZADO <<<")
+            break
+
+        minutos = int(restante.total_seconds() // 60)
+        segundos = int(restante.total_seconds() % 60)
+
+        print(
+            f"\r[{horario()}] Tempo restante: {minutos:02d}:{segundos:02d}",
+            end="",
+            flush=True,
+        )
+
+        time.sleep(1)
+
+
+# =====================================================
+# CALLBACK MQTT
+# =====================================================
+def on_connect(client, userdata, flags, rc):
+    print(f"[{horario()}] Conectado ao broker MQTT com código: {rc}")
+
+    if rc == 0:
+        client.subscribe(read_topic)
+        print(f"[{horario()}] Inscrito no tópico: {read_topic}")
+
+
+def on_message(client, userdata, message):
+
+    payload = message.payload.decode("utf-8")
+
+    print(f"\n[{horario()}] READ")
+    print(f"Tópico : {message.topic}")
+    print(f"Mensagem recebida: {payload}")
+
+    comando = None
+    duracao = None
+
+    # =================================================
+    # Tenta interpretar como JSON
+    # =================================================
+    try:
+        dados = json.loads(payload)
+
+        if isinstance(dados, dict):
+
+            comando = dados.get("comando", "").strip()
+
+            if "agendamento" in dados:
+
+                ag = dados["agendamento"]
+
+                print(f"[{horario()}] Agendamento recebido")
+                print(f"ID              : {ag.get('id')}")
+                print(f"Data            : {ag.get('data')}")
+                print(f"Horário         : {ag.get('horario')}")
+                print(f"Duração         : {ag.get('duracao_minutos')} minuto(s)")
+
+                duracao = int(ag.get("duracao_minutos", 0))
+
+    except json.JSONDecodeError:
+        # Não era JSON
+        comando = payload.strip()
+
+    # =================================================
+    # Validação do comando
+    # =================================================
+    comandos_validos = {"BalOn", "BalOff"}
+
+    if comando not in comandos_validos:
+        print(f"[{horario()}] Mensagem ignorada (não é comando válido).")
+        return
+
+    print(f"[{horario()}] Comando recebido: {comando}")
+
+    # =================================================
+    # Ação
+    # =================================================
+    acoes = {
+        "BalOn": "Acionando balizador",
+        "BalOff": "Desligando balizador",
+    }
+
+    resposta = f"Recebido: {comando}, {acoes[comando]}"
+
+    client.publish(write_topic, resposta)
+
+    print(f"[{horario()}] WRITE")
+    print(f"Tópico : {write_topic}")
+    print(f"Mensagem enviada: {resposta}")
+
+    # =================================================
+    # Timer SOMENTE para BalOn com agendamento
+    # =================================================
+    if (
+        comando == "BalOn"
+        and duracao is not None
+        and duracao > 0
+    ):
+        threading.Thread(
+            target=timer_agendamento,
+            args=(duracao,),
+            daemon=True
+        ).start()
+
+
+# =====================================================
+# CLIENTE MQTT
+# =====================================================
+client = mqtt.Client()
+
+client.on_connect = on_connect
+client.on_message = on_message
+
+print(f"[{horario()}] Conectando ao broker...")
+
+client.connect(broker_address, 1883, 60)
+
+client.loop_forever()

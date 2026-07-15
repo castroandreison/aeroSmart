@@ -1,0 +1,248 @@
+import json
+import math
+import random
+from datetime import datetime
+
+import paho.mqtt.client as mqtt
+
+# =====================================================
+# CONFIGURAÇÃO MQTT
+# =====================================================
+
+BROKER = "broker.emqx.io"
+PORT = 1883
+
+AEROCLUBE = "AeroClub Central"
+
+READ_TOPIC = f"SDM120/Write/{AEROCLUBE}"
+WRITE_TOPIC = f"SDM120/Read/{AEROCLUBE}"
+
+# =====================================================
+# INFORMAÇÕES DO EQUIPAMENTO
+# =====================================================
+
+FABRICANTE = "Eastron"
+MODELO = "SDM120"
+NUMERO_SERIE = "SDM120-000001"
+FIRMWARE = "1.0.0"
+
+energia_total = 1234.567
+
+# =====================================================
+# DATA / HORA
+# =====================================================
+
+def horario():
+    return datetime.now().strftime("%d/%m/%Y %H:%M:%S.%f")[:-3]
+
+
+def timestamp_iso():
+    return datetime.now().isoformat(timespec="milliseconds")
+
+
+# =====================================================
+# LEITURAS SIMULADAS
+# =====================================================
+
+def ler_registradores_energia():
+
+    global energia_total
+
+    tensao = round(random.uniform(220.0, 227.0), 2)
+
+    corrente = round(random.uniform(0.50, 15.00), 2)
+
+    fp = round(random.uniform(0.95, 1.00), 3)
+
+    potencia_aparente = round(tensao * corrente, 2)
+
+    potencia_ativa = round(potencia_aparente * fp, 2)
+
+    potencia_reativa = round(
+        math.sqrt(abs(potencia_aparente**2 - potencia_ativa**2)),
+        2
+    )
+
+    frequencia = round(random.uniform(59.95, 60.05), 2)
+
+    energia_total += potencia_ativa / 3600000
+
+    return {
+
+        "0000": {
+            "descricao": "Tensão",
+            "valor": tensao,
+            "unidade": "V"
+        },
+
+        "0006": {
+            "descricao": "Corrente",
+            "valor": corrente,
+            "unidade": "A"
+        },
+
+        "000C": {
+            "descricao": "Potência Ativa",
+            "valor": potencia_ativa,
+            "unidade": "W"
+        },
+
+        "0012": {
+            "descricao": "Potência Aparente",
+            "valor": potencia_aparente,
+            "unidade": "VA"
+        },
+
+        "0018": {
+            "descricao": "Potência Reativa",
+            "valor": potencia_reativa,
+            "unidade": "VAr"
+        },
+
+        "001E": {
+            "descricao": "Frequência",
+            "valor": frequencia,
+            "unidade": "Hz"
+        },
+
+        "0036": {
+            "descricao": "Fator de Potência",
+            "valor": fp,
+            "unidade": ""
+        },
+
+        "0046": {
+            "descricao": "Corrente Máxima",
+            "valor": round(corrente + random.uniform(0, 2), 2),
+            "unidade": "A"
+        },
+
+        "0156": {
+            "descricao": "Energia Importada",
+            "valor": round(energia_total, 3),
+            "unidade": "kWh"
+        }
+
+    }
+
+
+# =====================================================
+# MQTT
+# =====================================================
+
+def on_connect(client, userdata, flags, rc):
+
+    print(f"[{horario()}] Conectado ao broker MQTT (RC={rc})")
+
+    if rc == 0:
+
+        client.subscribe(READ_TOPIC)
+
+        print(f"[{horario()}] Inscrito em:")
+        print(f"              {READ_TOPIC}")
+
+
+# =====================================================
+# RECEBIMENTO
+# =====================================================
+
+def on_message(client, userdata, message):
+
+    payload = message.payload.decode("utf-8")
+
+    print("\n===================================================")
+    print(f"[{horario()}] READ")
+    print(f"Tópico : {message.topic}")
+    print(f"Mensagem recebida: {payload}")
+
+    try:
+        requisicao = json.loads(payload)
+
+    except json.JSONDecodeError:
+
+        print(f"[{horario()}] JSON inválido.")
+
+        return
+
+    # Aceita vários formatos
+    comando = (
+        requisicao.get("comando")
+        or requisicao.get("payload")
+        or ""
+    ).strip()
+
+    aeroclube_id = requisicao.get("aeroclube_id", 1)
+    aeroclube_nome = requisicao.get("aeroclube_nome", AEROCLUBE)
+
+    print(f"[{horario()}] Aeroclube : {aeroclube_nome}")
+    print(f"[{horario()}] Comando   : {comando}")
+
+    if comando != "ReadRegistersEnergy":
+
+        print(f"[{horario()}] Comando desconhecido.")
+
+        return
+
+    print(f"[{horario()}] Lendo registradores do SDM120...")
+
+    registradores = ler_registradores_energia()
+
+    resposta = {
+
+        "topic": WRITE_TOPIC,
+
+        "payload": "ReadRegistersEnergy",
+
+        "aeroclube_id": aeroclube_id,
+
+        "aeroclube_nome": aeroclube_nome,
+
+        "confirmado": True,
+
+        "timestamp": timestamp_iso(),
+
+        "equipamento": {
+
+            "fabricante": FABRICANTE,
+            "modelo": MODELO,
+            "numero_serie": NUMERO_SERIE,
+            "firmware": FIRMWARE
+
+        },
+
+        "status": "OK",
+
+        "registradores": registradores
+
+    }
+
+    mensagem = json.dumps(
+        resposta,
+        indent=4,
+        ensure_ascii=False
+    )
+
+    client.publish(WRITE_TOPIC, mensagem)
+
+    print("\n---------------------------------------------------")
+    print(f"[{horario()}] WRITE")
+    print(f"Tópico : {WRITE_TOPIC}")
+    print("Mensagem enviada:")
+    print(mensagem)
+    print("===================================================\n")
+
+
+# =====================================================
+# CLIENTE MQTT
+# =====================================================
+
+client = mqtt.Client()
+
+client.on_connect = on_connect
+client.on_message = on_message
+
+print(f"[{horario()}] Conectando ao broker MQTT...")
+
+client.connect(BROKER, PORT, 60)
+
+client.loop_forever()

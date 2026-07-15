@@ -419,6 +419,7 @@ class BalizamentoController : public esphome::Component {
   void publishStatus();
   void publishConsumption(float diff_kwh, unsigned long dur_sec);
   void publishEnergyRegisters();
+  void incrementMqttReceivedCount() { mqtt_received_count_++; }
 
   void initTuya();
   void checkTuya();
@@ -1000,7 +1001,7 @@ void BalizamentoController::publishHeartbeat() {
 
   uint32_t uptime_sec = (uint32_t)(esp_timer_get_time() / 1000000);
   uint32_t heap_free = (uint32_t)esp_get_free_heap_size();
-  uint32_t cpu_mhz = (uint32_t)(esp_clk_cpu_freq() / 1000000);
+  uint32_t cpu_mhz = ESP.getCpuFreqMHz();
   esp_reset_reason_t reset_reason = esp_reset_reason();
 
   const char *reset_str = "Desconhecido";
@@ -1373,7 +1374,7 @@ void balizamento_on_message(const std::string &payload, float energia) {
 
 void sdm120_on_message(const std::string &payload) {
   if (!g_controller) return;
-  g_controller->mqtt_received_count_++;
+  g_controller->incrementMqttReceivedCount();
   ESP_LOGI(TAG, "MQTT RECEBIDO [%s]: %s", SDM_WRITE_TOPIC, payload.c_str());
   StaticJsonDocument<256> doc;
   if (deserializeJson(doc, payload) == DeserializationError::Ok) {

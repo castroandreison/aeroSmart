@@ -13,6 +13,7 @@ echo Compilando...
 python -m esphome compile "C:\esp32_balizamento\esp32_balizamento.yaml"
 if %ERRORLEVEL% neq 0 (
     echo ERRO na compilacao.
+    pause
     exit /b 1
 )
 
@@ -21,6 +22,7 @@ echo Gravando na porta %PORTA%...
 python -m esphome upload "C:\esp32_balizamento\esp32_balizamento.yaml" --device %PORTA%
 if %ERRORLEVEL% neq 0 (
     echo ERRO ao gravar.
+    pause
     exit /b 1
 )
 

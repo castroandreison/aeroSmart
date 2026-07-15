@@ -1,0 +1,227 @@
+substitutions:
+  # Tuya Cloud IoT - preencha apenas se for usar o app Tuya
+  tuya_product_id: ""
+  tuya_device_id: ""
+  tuya_client_id: ""
+  tuya_secret: ""
+  tuya_region: "m2.tuyaeu.com"
+  firmware_url: "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.ota.bin"
+  firmware_version_url: "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/version.json"
+  firmware_md5_url: "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.md5"
+
+esphome:
+  name: balizamento-pista
+  friendly_name: Balizamento Pista
+  includes:
+    - balizamento_controller.h
+  libraries:
+    - "bblanchon/ArduinoJson@7.4.3"
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          g_controller = new BalizamentoController();
+          g_controller->setup();
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "AeroControl"
+    password: !secret ap_password
+    ap_timeout: 0s
+  on_connect:
+    - lambda: |-
+        if (g_controller) g_controller->onWiFiConnected();
+
+captive_portal:
+
+logger:
+
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          if (g_controller) g_controller->loop();
+  - interval: 300s
+    then:
+      - lambda: |-
+          if (g_controller) g_controller->publishHeartbeat();
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  id: mqtt_client
+  on_connect:
+    - lambda: |-
+        if (g_controller) g_controller->onMqttConnected();
+  on_disconnect:
+    - lambda: |-
+        if (g_controller) g_controller->onMqttDisconnected();
+  on_message:
+    - topic: "Bal/Write/AeroClub Central"
+      then:
+        - lambda: |-
+            float energia_atual = NAN;
+            if (!std::isnan(id(energia_importada).state)) {
+              energia_atual = id(energia_importada).state;
+            }
+            if (g_controller) g_controller->handleBalCommand(x, energia_atual);
+    - topic: "SDM120/Write/AeroClub Central"
+      then:
+        - lambda: |-
+            if (g_controller) sdm120_on_message(x);
+
+ota:
+  platform: esphome
+  password: !secret ota_password
+
+safe_mode:
+
+uart:
+  id: uart_rs485
+  tx_pin: GPIO17
+  rx_pin: GPIO18
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+modbus:
+  id: modbus1
+  uart_id: uart_rs485
+  flow_control_pin: GPIO16
+
+modbus_controller:
+  - id: sdm120
+    address: 1
+    modbus_id: modbus1
+    setup_priority: -10
+    command_throttle: 200ms
+
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Tensao"
+    address: 0x0000
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    id: tensao
+    on_value:
+      then:
+        - lambda: |-
+            if (g_controller) g_controller->setTensao(x);
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Corrente"
+    address: 0x0006
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    id: corrente
+    on_value:
+      then:
+        - lambda: |-
+            if (g_controller) g_controller->setCorrente(x);
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Potencia Ativa"
+    address: 0x000C
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "W"
+    accuracy_decimals: 2
+    id: potencia_ativa
+
+    on_value:
+      then:
+        - lambda: |-
+            if (g_controller) g_controller->setPotencia(x);
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Potencia Aparente"
+    address: 0x0012
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "VA"
+    accuracy_decimals: 2
+    id: potencia_aparente
+
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Potencia Reativa"
+    address: 0x0018
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "VAr"
+    accuracy_decimals: 2
+    id: potencia_reativa
+
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Frequencia"
+    address: 0x001E
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 2
+    id: frequencia
+
+    on_value:
+      then:
+        - lambda: |-
+            if (g_controller) g_controller->setFrequencia(x);
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Fator Potencia"
+    address: 0x0028
+    register_type: holding
+    value_type: FP32
+    accuracy_decimals: 3
+    id: fator_potencia
+
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Energia Importada"
+    address: 0x0046
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 3
+    id: energia_importada
+    on_value:
+      then:
+        - lambda: |-
+            if (g_controller) g_controller->setCurrentEnergy(x);
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm120
+    name: "Energia Exportada"
+    address: 0x0048
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 3
+    id: energia_exportada
+
+text_sensor:
+  - platform: template
+    name: "Status Balizamento"
+    id: status_text
+    update_interval: never

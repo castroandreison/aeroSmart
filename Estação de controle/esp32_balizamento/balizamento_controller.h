@@ -1,0 +1,1385 @@
+#pragma once
+
+#include "esphome.h"
+#include "esphome/core/log.h"
+#include "esphome/core/hal.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/mqtt/mqtt_client.h"
+
+#include <ArduinoJson.h>
+
+#include <esp_wifi.h>
+#include <esp_netif.h>
+#include <esp_mac.h>
+#include <esp_http_server.h>
+#include <esp_http_client.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+#include <nvs_flash.h>
+#include <mbedtls/md.h>
+#include <cstring>
+#include <string>
+#include <vector>
+#include <ctime>
+#include <cstdlib>
+
+static const char *TAG = "balizamento";
+
+#define BAL_READ_TOPIC   "Bal/Read/AeroClub Central"
+#define BAL_WRITE_TOPIC  "Bal/Write/AeroClub Central"
+#define SDM_READ_TOPIC   "SDM120/Read/AeroClub Central"
+#define SDM_WRITE_TOPIC  "SDM120/Write/AeroClub Central"
+#define RELAY_PIN        GPIO_NUM_2
+#define MAX_HISTORY      50
+#define NVS_NAMESPACE    "balizamento"
+
+#ifndef TUYA_PRODUCT_ID
+#define TUYA_PRODUCT_ID  ""
+#endif
+#ifndef TUYA_DEVICE_ID
+#define TUYA_DEVICE_ID   ""
+#endif
+#ifndef TUYA_CLIENT_ID
+#define TUYA_CLIENT_ID   ""
+#endif
+#ifndef TUYA_SECRET
+#define TUYA_SECRET      ""
+#endif
+#ifndef TUYA_REGION
+#define TUYA_REGION      "m2.tuyaeu.com"
+#endif
+
+static std::string g_tuya_pid = TUYA_PRODUCT_ID;
+static std::string g_tuya_did = TUYA_DEVICE_ID;
+static std::string g_tuya_cid = TUYA_CLIENT_ID;
+static std::string g_tuya_sec = TUYA_SECRET;
+static std::string g_tuya_reg = TUYA_REGION;
+
+// Heartbeat / Firmware metadata
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "2.0.4"
+#endif
+#ifndef FIRMWARE_BIN
+#define FIRMWARE_BIN "balizador_v2.0.4.bin"
+#endif
+#ifndef FIRMWARE_OTA_CHANNEL
+#define FIRMWARE_OTA_CHANNEL "stable"
+#endif
+#ifndef HEARTBEAT_TOPIC
+#define HEARTBEAT_TOPIC "Heartbeat/AeroClub Central"
+#endif
+#ifndef FIRMWARE_VERSION_URL
+#define FIRMWARE_VERSION_URL "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/version.json"
+#endif
+#ifndef FIRMWARE_URL
+#define FIRMWARE_URL "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.ota.bin"
+#endif
+#ifndef FIRMWARE_MD5_URL
+#define FIRMWARE_MD5_URL "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.md5"
+#endif
+#ifndef DEVICE_SERIAL
+#define DEVICE_SERIAL "ESP32-000001"
+#endif
+#ifndef DEVICE_HARDWARE
+#define DEVICE_HARDWARE "RevA"
+#endif
+
+class BalizamentoController;
+extern BalizamentoController *g_controller;
+
+struct ActivationRecord {
+  char timestamp[20];
+  uint32_t duration_sec;
+  float energy_kwh;
+  bool completed;
+  bool has_energy;
+};
+
+static const char INDEX_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Balizamento - Pista</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b0e14;color:#e0e4ec;padding:16px}
+.container{max-width:600px;margin:0 auto}
+.card{background:#151b26;border-radius:12px;padding:16px;margin-bottom:16px}
+h1{font-size:20px}
+h2{font-size:14px;text-transform:uppercase;letter-spacing:1px;color:#8892a4;margin-bottom:12px}
+.status{display:flex;gap:12px;flex-wrap:wrap}
+.badge{padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600}
+.badge-on{background:#1a6b3c;color:#4cdf8b}
+.badge-off{background:#5c1f1f;color:#ff6b6b}
+.badge-warn{background:#6b5c1f;color:#ffd93d}
+.badge-err{background:#3a1f3a;color:#ff6b9d}
+.timer{font-size:42px;font-weight:700;text-align:center;padding:16px 0;font-family:monospace;letter-spacing:2px}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+.controls input{flex:1;min-width:100px;padding:10px 12px;border-radius:8px;border:1px solid #2a3346;background:#0b0e14;color:#e0e4ec;font-size:15px}
+.controls button{flex:1;padding:10px 16px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
+.btn-on{background:#1a6b3c;color:#fff}.btn-off{background:#6b1f1f;color:#fff}
+.btn-danger{background:#8b3a3a;color:#fff}.btn-primary{background:#2a5c8a;color:#fff}
+.readings{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.reading{padding:12px;background:#0b0e14;border-radius:8px;text-align:center}
+.reading .val{font-size:22px;font-weight:700}.reading .lbl{font-size:11px;color:#8892a4}
+.consumo-box{padding:12px;background:#0f1a2e;border-radius:8px;margin-top:8px;text-align:center}
+.consumo-box .val{font-size:28px;color:#4c9aff}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 4px;text-align:left;border-bottom:1px solid #1f2838}
+th{color:#8892a4;font-size:11px;text-transform:uppercase}
+.ota-section{display:flex;gap:8px;flex-wrap:wrap}
+.ota-section input{flex:1;min-width:150px;padding:10px 12px;border-radius:8px;border:1px solid #2a3346;background:#0b0e14;color:#e0e4ec;font-size:14px}
+.timestamp{font-size:11px;color:#5a6a7e;margin-top:8px}
+#wifiDetail{font-size:12px;color:#8892a4;margin-top:4px}
+@media(max-width:400px){.readings{grid-template-columns:1fr}.controls{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="card">
+<h1>Balizamento Pista</h1>
+<div class="status">
+<span class="badge badge-off" id="relayBadge">Desligado</span>
+<span class="badge badge-off" id="wifiBadge">WiFi</span>
+<span class="badge badge-off" id="mqttBadge">MQTT</span>
+</div>
+<div class="timestamp" id="ipDisplay"></div>
+<div id="wifiDetail"></div>
+</div>
+<div class="card">
+<h2>Controle</h2>
+<div class="timer" id="timerDisplay">--:--:--</div>
+<div class="controls">
+<input type="number" id="durationInput" placeholder="Duracao (min)" min="0" step="1">
+<button class="btn-on" onclick="sendCmd('on')">Ligar</button>
+<button class="btn-off" onclick="sendCmd('off')">Desligar</button>
+</div>
+</div>
+<div class="card">
+<h2>Medidor SDM120</h2>
+<div class="readings">
+<div class="reading"><div class="val" id="rTensao">--</div><div class="lbl">Tensao</div></div>
+<div class="reading"><div class="val" id="rCorrente">--</div><div class="lbl">Corrente</div></div>
+<div class="reading"><div class="val" id="rPotencia">--</div><div class="lbl">Potencia</div></div>
+<div class="reading"><div class="val" id="rFreq">--</div><div class="lbl">Frequencia</div></div>
+</div>
+<div class="consumo-box">
+<div style="font-size:12px;color:#8892a4">Ultimo Consumo</div>
+<div class="val" id="lastConsumo">-- kWh</div>
+<div style="font-size:12px;color:#5a6a7e" id="lastConsumoDur"></div>
+</div>
+</div>
+<div class="card">
+<h2>Historico</h2>
+<table>
+<thead><tr><th>Data</th><th>Duracao</th><th>Consumo</th><th>Status</th></tr></thead>
+<tbody id="historyBody"><tr><td colspan="4">Carregando...</td></tr></tbody>
+</table>
+</div>
+<div class="card">
+<h2>Configuracoes</h2>
+<div style="display:flex;gap:4px;margin-bottom:12px">
+<button class="btn-primary" style="flex:1;font-size:13px;padding:6px" onclick="showTab('rede')">Rede</button>
+<button class="btn-primary" style="flex:1;font-size:13px;padding:6px" onclick="showTab('geral')">Geral</button>
+</div>
+<div id="tabRede">
+<div style="display:grid;gap:8px">
+<input type="text" id="cfgSsid" placeholder="WiFi SSID">
+<input type="password" id="cfgPass" placeholder="WiFi Senha">
+<button class="btn-on" onclick="saveConfig()">Salvar e Reiniciar</button>
+</div>
+</div>
+<div id="tabGeral" style="display:none">
+<div class="ota-section">
+<input type="url" id="otaUrl" placeholder="URL do firmware (.bin)">
+<button class="btn-danger" onclick="doOTA()">Atualizar FW</button>
+</div>
+<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+<button class="btn-primary" onclick="restartESP()">Reiniciar</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+async function fetchJSON(url,opts){
+  try{
+    const r=await fetch(url,opts);return await r.json();
+  }catch(e){return null}
+}
+function fmtTime(s){
+  if(s==null||s<0)return'--:--:--';
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+}
+async function fetchStatus(){
+  const d=await fetchJSON('/api/status');
+  if(!d)return;
+  document.getElementById('relayBadge').textContent=d.relay_on?'Ligado':'Desligado';
+  document.getElementById('relayBadge').className='badge '+(d.relay_on?'badge-on':'badge-off');
+  document.getElementById('timerDisplay').textContent=fmtTime(d.timer_remaining);
+  if(d.wifi){
+    const rssi=d.rssi||-100;
+    let c='badge-on',co='#4cdf8b';
+    if(rssi<-67){c='badge-warn';co='#ffd93d'}
+    if(rssi<-80){c='badge-off';co='#ff6b6b'}
+    document.getElementById('wifiBadge').textContent=rssi+' dBm';
+    document.getElementById('wifiBadge').className='badge '+c;
+    document.getElementById('wifiDetail').innerHTML='<b>'+d.ssid+'</b> | <span style="color:'+co+'">'+d.wifi_quality+'</span>';
+  }else{
+    document.getElementById('wifiBadge').textContent='WiFi:(';
+    document.getElementById('wifiBadge').className='badge badge-err';
+  }
+  document.getElementById('mqttBadge').textContent=d.mqtt?'MQTT OK':'MQTT:(';
+  document.getElementById('mqttBadge').className='badge '+(d.mqtt?'badge-on':'badge-err');
+  document.getElementById('ipDisplay').textContent='IP: '+d.ip;
+  if(d.energy){
+    document.getElementById('rTensao').textContent=d.energy.tensao||'--';
+    document.getElementById('rCorrente').textContent=d.energy.corrente||'--';
+    document.getElementById('rPotencia').textContent=d.energy.potencia||'--';
+    document.getElementById('rFreq').textContent=d.energy.frequencia||'--';
+  }
+  if(d.last_consumo!=null){
+    document.getElementById('lastConsumo').textContent=d.last_consumo.toFixed(3)+' kWh';
+    document.getElementById('lastConsumoDur').textContent='Duracao: '+fmtTime(d.last_duration||0);
+  }
+}
+async function fetchHistory(){
+  const d=await fetchJSON('/api/history');
+  if(!d)return;
+  const tbody=document.getElementById('historyBody');
+  tbody.innerHTML='';
+  if(!d.history||d.history.length===0){
+    tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#5a6a7e">Nenhum registro</td></tr>';
+    return;
+  }
+  for(const h of d.history){
+    const tr=document.createElement('tr');
+    const e=h.has_energy?h.energy_kwh.toFixed(3):'--';
+    tr.innerHTML='<td>'+h.date+'</td><td>'+fmtTime(h.duration_sec)+'</td><td>'+e+' kWh</td><td>'+(h.completed?'OK':'Interrompido')+'</td>';
+    tbody.appendChild(tr);
+  }
+}
+async function sendCmd(action){
+  const dur=document.getElementById('durationInput').value;
+  const body={action:action};
+  if(action==='on'&&dur>0)body.duration_min=parseFloat(dur);
+  await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+}
+async function doOTA(){
+  const url=document.getElementById('otaUrl').value.trim();
+  if(!url||!url.startsWith('http'))return alert('URL invalida');
+  if(!confirm('ATENCAO: O dispositivo sera reiniciado. Continuar?'))return;
+  await fetch('/api/ota',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url})});
+  alert('OTA iniciado! O dispositivo sera reiniciado.');
+}
+async function restartESP(){
+  if(!confirm('Reiniciar dispositivo?'))return;
+  await fetch('/api/restart',{method:'POST'});
+}
+function showTab(tab){
+  document.getElementById('tabRede').style.display=tab==='rede'?'block':'none';
+  document.getElementById('tabGeral').style.display=tab==='geral'?'block':'none';
+}
+async function loadConfig(){
+  const d=await fetchJSON('/api/config');
+  if(!d)return;
+  document.getElementById('cfgSsid').value=d.wifi_ssid||'';
+}
+async function saveConfig(){
+  const body={
+    wifi_ssid:document.getElementById('cfgSsid').value.trim(),
+    wifi_password:document.getElementById('cfgPass').value,
+    mqtt_broker:'broker.emqx.io',
+    mqtt_port:1883,
+    mqtt_username:'',
+    mqtt_password:''
+  };
+  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=r?await r.json():null;
+  if(d&&d.success){
+    alert('Configuracoes salvas! O dispositivo sera reiniciado.');
+    restartESP();
+  }else{
+    alert('Erro ao salvar configuracoes.');
+  }
+}
+fetchStatus();fetchHistory();loadConfig();
+setInterval(fetchStatus,1000);setInterval(fetchHistory,10000);
+</script>
+</body>
+</html>
+)rawliteral";
+
+struct HistoryEntry {
+  uint32_t timestamp;
+  uint32_t duration_sec;
+  float energy_kwh;
+  bool completed;
+  bool has_energy;
+};
+
+struct SavedConfig {
+  char wifi_ssid[33];
+  char wifi_password[65];
+  char mqtt_broker[129];
+  uint16_t mqtt_port;
+  char mqtt_username[65];
+  char mqtt_password[65];
+};
+
+class BalizamentoController : public esphome::Component {
+ public:
+  bool relay_on_ = false;
+  bool timer_active_ = false;
+  unsigned long timer_start_ms_ = 0;
+  unsigned long timer_duration_ms_ = 0;
+  float energy_start_kwh_ = 0;
+  float energy_end_kwh_ = 0;
+  float current_energy_ = 0;
+  float current_tensao_ = 0;
+  float current_corrente_ = 0;
+  float current_potencia_ = 0;
+  float current_frequencia_ = 0;
+  float last_consumo_ = 0;
+  unsigned long last_duration_sec_ = 0;
+  bool has_energy_data_ = false;
+  unsigned long last_ms_ = 0;
+
+ public:
+  BalizamentoController() {}
+
+  void setup() override;
+  void loop() override;
+  float get_setup_priority() const override {
+    return esphome::setup_priority::AFTER_WIFI + 10;
+  }
+
+  void handleBalCommand(const std::string &payload, float energia);
+  void setCurrentEnergy(float v) { current_energy_ = v; has_energy_data_ = !std::isnan(v); }
+  void setTensao(float v) { current_tensao_ = v; }
+  void setCorrente(float v) { current_corrente_ = v; }
+  void setPotencia(float v) { current_potencia_ = v; }
+  void setFrequencia(float v) { current_frequencia_ = v; }
+
+  // Heartbeat
+  void publishHeartbeat();
+  void onWiFiConnected();
+  void onMqttConnected();
+  void onMqttDisconnected();
+
+  SavedConfig getConfig() { return saved_config_; }
+  void loadSavedConfig();
+  void saveConfig(const SavedConfig &cfg);
+  void reconnectWiFi();
+  void ensureAP();
+
+  static void setTuyaConfig(const char *pid, const char *did, const char *cid, const char *sec, const char *reg) {
+    if (pid) g_tuya_pid = pid;
+    if (did) g_tuya_did = did;
+    if (cid) g_tuya_cid = cid;
+    if (sec) g_tuya_sec = sec;
+    if (reg) g_tuya_reg = reg;
+  }
+
+ private:
+  httpd_handle_t server_ = NULL;
+  bool ap_started_ = false;
+  bool tuya_ok_ = false;
+  unsigned long last_tuya_reconnect_ = 0;
+  nvs_handle_t nvs_handle_;
+  std::vector<HistoryEntry> history_;
+  SavedConfig saved_config_;
+
+  void initWebServer();
+  void checkTimer();
+  void finishActivation(bool completed);
+  void loadHistory();
+  void saveHistory();
+  void addHistory(uint32_t dur, float energy, bool completed, bool has_energy);
+
+  // Heartbeat tracking
+  int mqtt_published_count_ = 0;
+  int mqtt_received_count_ = 0;
+  int wifi_reconnect_count_ = 0;
+  int restart_count_ = 0;
+  int activation_count_ = 0;
+  unsigned long total_on_time_ms_ = 0;
+  unsigned long last_mqtt_connect_ms_ = 0;
+  time_t last_mqtt_connect_time_ = 0;
+  std::string last_command_;
+  std::string last_activation_timestamp_;
+  std::string app_sha256_;
+  bool mqtt_was_connected_ = false;
+  bool wifi_was_connected_ = false;
+  bool heartbeat_initialized_ = false;
+
+ public:
+  void publishStatus();
+  void publishConsumption(float diff_kwh, unsigned long dur_sec);
+  void publishEnergyRegisters();
+
+  void initTuya();
+  void checkTuya();
+  static std::string tuyaHmacSha256(const std::string &key, const std::string &msg);
+  void performOTA(const std::string &url);
+
+  static void getWiFiInfo(int &rssi, std::string &ssid, std::string &ip, std::string &mac, bool &connected);
+  static std::string fmtTimestamp(time_t t);
+  static std::string fmtDate(time_t t);
+
+  static esp_err_t handleRoot(httpd_req_t *req);
+  static esp_err_t handleApiStatus(httpd_req_t *req);
+  static esp_err_t handleApiControl(httpd_req_t *req);
+  static esp_err_t handleApiHistory(httpd_req_t *req);
+  static esp_err_t handleApiOTA(httpd_req_t *req);
+  static esp_err_t handleApiRestart(httpd_req_t *req);
+  static esp_err_t handleApiConfig(httpd_req_t *req);
+};
+
+BalizamentoController *g_controller = nullptr;
+
+// ==================== WIFI INFO ====================
+void BalizamentoController::getWiFiInfo(int &rssi, std::string &ssid, std::string &ip, std::string &mac, bool &connected) {
+  rssi = 0; ssid.clear(); ip.clear(); mac.clear(); connected = false;
+  wifi_ap_record_t ap = {};
+  if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+    rssi = ap.rssi;
+    ssid = std::string((char *)ap.ssid);
+    connected = true;
+  }
+  esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (netif) {
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(netif, &info) == ESP_OK) {
+      char buf[16];
+      esp_ip4addr_ntoa(&info.ip, buf, sizeof(buf));
+      ip = buf;
+    }
+  }
+  uint8_t m[6];
+  if (esp_read_mac(m, ESP_MAC_WIFI_STA) == ESP_OK) {
+    char buf[18];
+    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
+    mac = buf;
+  }
+}
+
+// ==================== TIMESTAMP ====================
+std::string BalizamentoController::fmtTimestamp(time_t t) {
+  if (t < 100000) {
+    unsigned long ms = (unsigned long)(esp_timer_get_time() / 1000);
+    unsigned long sec = ms / 1000, mi = sec / 60, hr = mi / 60;
+    char buf[25];
+    snprintf(buf, sizeof(buf), "UP %02lu:%02lu:%02lu", hr % 24, mi % 60, sec % 60);
+    return std::string(buf);
+  }
+  struct tm *ti = localtime(&t);
+  char buf[25];
+  snprintf(buf, sizeof(buf), "%02d/%02d/%04d %02d:%02d:%02d",
+           ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900, ti->tm_hour, ti->tm_min, ti->tm_sec);
+  return std::string(buf);
+}
+
+std::string BalizamentoController::fmtDate(time_t t) {
+  if (t < 100000) return std::string("--/--/----");
+  struct tm *ti = localtime(&t);
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%02d/%02d/%04d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900);
+  return std::string(buf);
+}
+
+// ==================== SETUP ====================
+void BalizamentoController::setup() {
+  ESP_LOGI(TAG, "Inicializando...");
+  g_controller = this;
+
+  gpio_set_direction(RELAY_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level(RELAY_PIN, 0);
+  relay_on_ = false;
+
+  loadHistory();
+  loadSavedConfig();
+  ensureAP();
+  if (strlen(saved_config_.wifi_ssid) > 0) {
+    reconnectWiFi();
+  }
+  initWebServer();
+  initTuya();
+
+  {
+    int rssi; std::string ssid, ip, mac; bool wk;
+    getWiFiInfo(rssi, ssid, ip, mac, wk);
+    if (wk) {
+      ESP_LOGI(TAG, "WiFi conectado - SSID: %s, IP: %s, RSSI: %d", ssid.c_str(), ip.c_str(), rssi);
+    } else {
+      ESP_LOGI(TAG, "Modo AP - Rede: AeroControl, IP: 192.168.4.1");
+    }
+  }
+
+  // Increment restart counter in NVS
+  {
+    nvs_handle_t h;
+    if (nvs_open("heartbeat", NVS_READWRITE, &h) == ESP_OK) {
+      int32_t v = 0;
+      nvs_get_i32(h, "restarts", &v);
+      v++;
+      restart_count_ = (int)v;
+      nvs_set_i32(h, "restarts", v);
+      nvs_commit(h);
+      nvs_close(h);
+    }
+  }
+
+  // Publish initial heartbeat (will queue until MQTT connects)
+  ESP_LOGI(TAG, "Setup concluido");
+}
+
+void BalizamentoController::loop() {
+  checkTimer();
+  checkTuya();
+
+  // Detect MQTT connection state changes
+  bool mqtt_now = esphome::mqtt::global_mqtt_client &&
+                   esphome::mqtt::global_mqtt_client->is_connected();
+  if (mqtt_now && !mqtt_was_connected_) {
+    onMqttConnected();
+  } else if (!mqtt_now && mqtt_was_connected_) {
+    onMqttDisconnected();
+  }
+
+  // Detect WiFi connection state changes
+  wifi_ap_record_t ap = {};
+  bool wifi_now = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK);
+  if (wifi_now && !wifi_was_connected_) {
+    wifi_was_connected_ = true;
+  } else if (!wifi_now && wifi_was_connected_) {
+    wifi_was_connected_ = false;
+  }
+
+  // Track total on time
+  if (relay_on_) {
+    total_on_time_ms_ += 50;
+  }
+}
+
+// ==================== WEB SERVER ====================
+void BalizamentoController::initWebServer() {
+  httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+  cfg.max_uri_handlers = 20;
+  cfg.lru_purge_enable = true;
+
+  if (httpd_start(&server_, &cfg) == ESP_OK) {
+    httpd_uri_t uris[] = {
+      {"/",              HTTP_GET,  handleRoot,       NULL},
+      {"/api/status",    HTTP_GET,  handleApiStatus,  NULL},
+      {"/api/control",   HTTP_POST, handleApiControl, NULL},
+      {"/api/history",   HTTP_GET,  handleApiHistory, NULL},
+      {"/api/ota",       HTTP_POST, handleApiOTA,       NULL},
+      {"/api/restart",   HTTP_POST, handleApiRestart,   NULL},
+      {"/api/config",    HTTP_GET,  handleApiConfig,    NULL},
+      {"/api/config",    HTTP_POST, handleApiConfig,    NULL},
+    };
+    for (auto &u : uris) httpd_register_uri_handler(server_, &u);
+    ESP_LOGI(TAG, "Web server iniciado na porta 80");
+  } else {
+    ESP_LOGE(TAG, "Falha ao iniciar web server");
+  }
+}
+
+esp_err_t BalizamentoController::handleRoot(httpd_req_t *req) {
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+  httpd_resp_send(req, INDEX_HTML, strlen(INDEX_HTML));
+  return ESP_OK;
+}
+
+esp_err_t BalizamentoController::handleApiStatus(httpd_req_t *req) {
+  if (!g_controller) { httpd_resp_send_404(req); return ESP_FAIL; }
+  auto &c = *g_controller;
+
+  int rssi; std::string ssid, ip, mac; bool wifi_ok;
+  getWiFiInfo(rssi, ssid, ip, mac, wifi_ok);
+
+  bool mqtt_ok = esphome::mqtt::global_mqtt_client &&
+                  esphome::mqtt::global_mqtt_client->is_connected();
+
+  StaticJsonDocument<1024> doc;
+  doc["relay_on"] = c.relay_on_;
+  doc["timer_active"] = c.timer_active_;
+  if (c.timer_active_) {
+    unsigned long el = (unsigned long)(esp_timer_get_time() / 1000) - c.timer_start_ms_;
+    long rem = (c.timer_duration_ms_ > el) ? (c.timer_duration_ms_ - el) / 1000 : 0;
+    doc["timer_remaining"] = rem;
+    doc["timer_total"] = c.timer_duration_ms_ / 1000;
+  } else {
+    doc["timer_remaining"] = -1;
+  }
+  doc["wifi"] = wifi_ok;
+  doc["mqtt"] = mqtt_ok;
+  doc["tuya"] = c.tuya_ok_;
+  doc["ip"] = ip;
+  doc["ssid"] = ssid;
+  doc["rssi"] = rssi;
+
+  if (rssi >= -50) { doc["wifi_quality"] = "Excelente"; }
+  else if (rssi >= -60) { doc["wifi_quality"] = "Bom"; }
+  else if (rssi >= -67) { doc["wifi_quality"] = "Satisfatorio"; }
+  else if (rssi >= -80) { doc["wifi_quality"] = "Fraco"; }
+  else { doc["wifi_quality"] = "Inutilizavel"; }
+
+  doc["uptime"] = (unsigned long)(esp_timer_get_time() / 1000000);
+  doc["last_consumo"] = c.last_consumo_;
+  doc["last_duration"] = c.last_duration_sec_;
+
+  JsonObject en = doc.createNestedObject("energy");
+  en["tensao"] = (c.current_tensao_ > 0) ? std::to_string(c.current_tensao_).substr(0,4) : "--";
+  en["corrente"] = (c.current_corrente_ > 0) ? std::to_string(c.current_corrente_).substr(0,5) : "--";
+  en["potencia"] = (c.current_potencia_ > 0) ? std::to_string(c.current_potencia_).substr(0,5) : "--";
+  en["frequencia"] = (c.current_frequencia_ > 0) ? std::to_string(c.current_frequencia_).substr(0,4) : "--";
+  en["energia"] = c.current_energy_;
+  en["has_data"] = c.has_energy_data_;
+
+  doc["saved_ssid"] = c.saved_config_.wifi_ssid;
+  doc["saved_broker"] = c.saved_config_.mqtt_broker;
+  doc["wifi_configured"] = strlen(c.saved_config_.wifi_ssid) > 0;
+
+  doc["timestamp"] = fmtTimestamp(time(nullptr));
+
+  std::string out;
+  serializeJson(doc, out);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+esp_err_t BalizamentoController::handleApiControl(httpd_req_t *req) {
+  if (!g_controller) { httpd_resp_send_404(req); return ESP_FAIL; }
+  char buf[512];
+  int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (len <= 0) { httpd_resp_send_404(req); return ESP_FAIL; }
+  buf[len] = 0;
+
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, buf) != DeserializationError::Ok) {
+    httpd_resp_send_404(req);
+    return ESP_FAIL;
+  }
+
+  const char *action = doc["action"];
+  if (!action) { httpd_resp_send_404(req); return ESP_FAIL; }
+
+  if (strcmp(action, "on") == 0) {
+    g_controller->handleBalCommand("BalOn", g_controller->current_energy_);
+    float dur = doc["duration_min"] | 0;
+    if (dur > 0) {
+      g_controller->timer_duration_ms_ = (unsigned long)(dur * 60000);
+      g_controller->timer_start_ms_ = (unsigned long)(esp_timer_get_time() / 1000);
+      g_controller->timer_active_ = true;
+    }
+  } else if (strcmp(action, "off") == 0) {
+    g_controller->handleBalCommand("BalOff", g_controller->current_energy_);
+  }
+
+  const char *resp = "{\"success\":true}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, resp, strlen(resp));
+  return ESP_OK;
+}
+
+esp_err_t BalizamentoController::handleApiHistory(httpd_req_t *req) {
+  if (!g_controller) { httpd_resp_send_404(req); return ESP_FAIL; }
+  auto &c = *g_controller;
+
+  StaticJsonDocument<8192> doc;
+  JsonArray arr = doc.createNestedArray("history");
+  for (const auto &h : c.history_) {
+    JsonObject o = arr.createNestedObject();
+    o["date"] = fmtDate(h.timestamp);
+    o["duration_sec"] = h.duration_sec;
+    o["energy_kwh"] = h.energy_kwh;
+    o["completed"] = h.completed;
+    o["has_energy"] = h.has_energy;
+  }
+  doc["count"] = c.history_.size();
+
+  std::string out;
+  serializeJson(doc, out);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+esp_err_t BalizamentoController::handleApiOTA(httpd_req_t *req) {
+  if (!g_controller) { httpd_resp_send_404(req); return ESP_FAIL; }
+  char buf[512];
+  int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (len <= 0) { httpd_resp_send_404(req); return ESP_FAIL; }
+  buf[len] = 0;
+
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, buf) != DeserializationError::Ok) {
+    httpd_resp_send_404(req); return ESP_FAIL;
+  }
+  const char *url = doc["url"];
+  if (!url || strlen(url) < 5) { httpd_resp_send_404(req); return ESP_FAIL; }
+
+  const char *resp = "{\"success\":true}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, resp, strlen(resp));
+
+  g_controller->performOTA(std::string(url));
+  return ESP_OK;
+}
+
+esp_err_t BalizamentoController::handleApiRestart(httpd_req_t *req) {
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, "{\"success\":true}", 16);
+  vTaskDelay(pdMS_TO_TICKS(100));
+  esp_restart();
+  return ESP_OK;
+}
+
+esp_err_t BalizamentoController::handleApiConfig(httpd_req_t *req) {
+  if (!g_controller) { httpd_resp_send_404(req); return ESP_FAIL; }
+  auto &c = *g_controller;
+
+  if (req->method == HTTP_GET) {
+    StaticJsonDocument<1024> doc;
+    doc["wifi_ssid"] = c.saved_config_.wifi_ssid;
+    doc["mqtt_broker"] = c.saved_config_.mqtt_broker;
+    doc["mqtt_port"] = c.saved_config_.mqtt_port;
+    doc["mqtt_username"] = c.saved_config_.mqtt_username;
+
+    std::string out;
+    serializeJson(doc, out);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, out.c_str(), out.length());
+    return ESP_OK;
+  }
+
+  char buf[1024];
+  int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (len <= 0) { httpd_resp_send_404(req); return ESP_FAIL; }
+  buf[len] = 0;
+
+  StaticJsonDocument<1024> doc;
+  if (deserializeJson(doc, buf) != DeserializationError::Ok) {
+    httpd_resp_send_404(req);
+    return ESP_FAIL;
+  }
+
+  SavedConfig cfg = {};
+  const char *ssid = doc["wifi_ssid"];
+  const char *pass = doc["wifi_password"];
+  const char *broker = doc["mqtt_broker"];
+  int port = doc["mqtt_port"] | 1883;
+  const char *muser = doc["mqtt_username"];
+  const char *mpass = doc["mqtt_password"];
+
+  if (ssid) strncpy(cfg.wifi_ssid, ssid, sizeof(cfg.wifi_ssid) - 1);
+  if (pass) strncpy(cfg.wifi_password, pass, sizeof(cfg.wifi_password) - 1);
+  if (broker) strncpy(cfg.mqtt_broker, broker, sizeof(cfg.mqtt_broker) - 1);
+  cfg.mqtt_port = (uint16_t)port;
+  if (muser) strncpy(cfg.mqtt_username, muser, sizeof(cfg.mqtt_username) - 1);
+  if (mpass) strncpy(cfg.mqtt_password, mpass, sizeof(cfg.mqtt_password) - 1);
+
+  c.saveConfig(cfg);
+
+  bool needs_reboot = true;
+  StaticJsonDocument<128> resp;
+  resp["success"] = true;
+  resp["needs_reboot"] = needs_reboot;
+
+  std::string out;
+  serializeJson(resp, out);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+// ==================== TIMER ====================
+void BalizamentoController::checkTimer() {
+  if (!timer_active_) return;
+  unsigned long now = (unsigned long)(esp_timer_get_time() / 1000);
+  unsigned long elapsed = now - timer_start_ms_;
+  if (elapsed >= timer_duration_ms_) {
+    ESP_LOGI(TAG, "Timer expirado");
+    timer_active_ = false;
+    finishActivation(true);
+  }
+}
+
+void BalizamentoController::finishActivation(bool completed) {
+  if (!relay_on_) { timer_active_ = false; return; }
+  energy_end_kwh_ = current_energy_;
+  gpio_set_level(RELAY_PIN, 0);
+  relay_on_ = false;
+
+  unsigned long dur_ms = timer_active_ ? ((unsigned long)(esp_timer_get_time() / 1000) - timer_start_ms_) : timer_duration_ms_;
+  unsigned long dur_sec = (dur_ms > 0) ? dur_ms / 1000 : 1;
+
+  float diff = 0;
+  bool he = has_energy_data_ && energy_start_kwh_ > 0;
+  if (he && energy_end_kwh_ > energy_start_kwh_) diff = energy_end_kwh_ - energy_start_kwh_;
+
+  last_consumo_ = diff;
+  last_duration_sec_ = dur_sec;
+  addHistory(dur_sec, diff, completed, he);
+  publishConsumption(diff, dur_sec);
+  publishStatus();
+  tuya_ok_ = false; // simplified: no Tuya DP report in IDF version
+  timer_active_ = false;
+  ESP_LOGI(TAG, "Ativacao finalizada - %lus %.3fkWh", dur_sec, diff);
+}
+
+// ==================== COMANDOS ====================
+void BalizamentoController::handleBalCommand(const std::string &payload, float energia) {
+  mqtt_received_count_++;
+  ESP_LOGI(TAG, "MQTT RECEBIDO [%s]: %s", BAL_WRITE_TOPIC, payload.c_str());
+  std::string cmd;
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, payload) == DeserializationError::Ok && doc.is<JsonObject>()) {
+    const char *c = doc["comando"]; if (c) cmd = c;
+    if (doc.containsKey("agendamento")) {
+      float dur = doc["agendamento"]["duracao_minutos"] | 0;
+      if (dur > 0) {
+        timer_duration_ms_ = (unsigned long)(dur * 60000);
+        timer_active_ = true;
+      }
+    }
+  } else {
+    cmd = payload;
+  }
+
+  last_command_ = cmd;
+
+  if (cmd == "BalOn") {
+    energy_start_kwh_ = energia;
+    gpio_set_level(RELAY_PIN, 1);
+    relay_on_ = true;
+    timer_start_ms_ = (unsigned long)(esp_timer_get_time() / 1000);
+    if (timer_duration_ms_ == 0) { timer_duration_ms_ = 600000; timer_active_ = true; }
+    activation_count_++;
+    time_t t = time(nullptr);
+    struct tm *ti = localtime(&t);
+    char buf[25];
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ti);
+    last_activation_timestamp_ = buf;
+    publishStatus();
+  } else if (cmd == "BalOff") {
+    finishActivation(false);
+  } else if (cmd == "UpdateFirmware") {
+    const char *url = doc["url"];
+    if (url && strlen(url) > 5) {
+      ESP_LOGI(TAG, "Iniciando OTA via MQTT: %s", url);
+      performOTA(std::string(url));
+    } else {
+      ESP_LOGE(TAG, "UpdateFirmware sem URL valida");
+    }
+  }
+}
+
+// ==================== MQTT ====================
+void BalizamentoController::publishStatus() {
+  if (!esphome::mqtt::global_mqtt_client) return;
+  StaticJsonDocument<256> doc;
+  doc["comando"] = relay_on_ ? "BalOn" : "BalOff";
+  doc["estado"] = relay_on_;
+  doc["timestamp"] = fmtTimestamp(time(nullptr));
+  std::string out;
+  serializeJson(doc, out);
+  mqtt_published_count_++;
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", BAL_READ_TOPIC, out.c_str());
+  esphome::mqtt::global_mqtt_client->publish(BAL_READ_TOPIC, out);
+}
+
+void BalizamentoController::publishConsumption(float diff_kwh, unsigned long dur_sec) {
+  if (!esphome::mqtt::global_mqtt_client) return;
+  StaticJsonDocument<512> doc;
+  doc["comando"] = "ConsumoBalizamento";
+  doc["energia_inicial_kwh"] = energy_start_kwh_;
+  doc["energia_final_kwh"] = energy_end_kwh_;
+  doc["consumo_kwh"] = diff_kwh;
+  doc["duracao_segundos"] = dur_sec;
+  doc["duracao_minutos"] = dur_sec / 60.0;
+  doc["timestamp"] = fmtTimestamp(time(nullptr));
+  std::string out;
+  serializeJson(doc, out);
+  mqtt_published_count_++;
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", BAL_READ_TOPIC, out.c_str());
+  esphome::mqtt::global_mqtt_client->publish(BAL_READ_TOPIC, out);
+}
+
+void BalizamentoController::publishEnergyRegisters() {
+  if (!esphome::mqtt::global_mqtt_client) return;
+  StaticJsonDocument<2048> doc;
+  doc["topic"] = SDM_READ_TOPIC;
+  doc["payload"] = "ReadRegistersEnergy";
+  doc["aeroclube_id"] = 1;
+  doc["aeroclube_nome"] = "AeroClub Central";
+  doc["confirmado"] = true;
+  doc["timestamp"] = fmtTimestamp(time(nullptr));
+  JsonObject eq = doc.createNestedObject("equipamento");
+  eq["fabricante"] = "Eastron";
+  eq["modelo"] = "SDM120";
+
+  std::string mac; int rssi; std::string ssid, ip; bool wk;
+  getWiFiInfo(rssi, ssid, ip, mac, wk);
+  ESP_LOGI(TAG, "WiFi conectado - SSID: %s, IP: %s", ssid.c_str(), ip.c_str());
+  eq["numero_serie"] = mac;
+  eq["firmware"] = "1.0.0";
+  doc["status"] = "OK";
+
+  JsonObject regs = doc.createNestedObject("registradores");
+  auto addReg = [&](const char *addr, const char *desc, float val, const char *unit) {
+    regs[addr]["descricao"] = desc;
+    regs[addr]["valor"] = (val > 0) ? val : 0;
+    regs[addr]["unidade"] = unit;
+  };
+  addReg("0000", "Tensao", current_tensao_, "V");
+  addReg("0006", "Corrente", current_corrente_, "A");
+  addReg("000C", "Potencia Ativa", current_potencia_, "W");
+  addReg("0012", "Potencia Aparente", 0, "VA");
+  addReg("0018", "Potencia Reativa", 0, "VAr");
+  addReg("001E", "Frequencia", current_frequencia_, "Hz");
+  addReg("0036", "Fator Potencia", 0, "");
+  addReg("0046", "Energia Importada", current_energy_, "kWh");
+
+  std::string out;
+  serializeJson(doc, out);
+  mqtt_published_count_++;
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", SDM_READ_TOPIC, out.c_str());
+  esphome::mqtt::global_mqtt_client->publish(SDM_READ_TOPIC, out);
+}
+
+// ==================== HEARTBEAT TRACKING ====================
+void BalizamentoController::onWiFiConnected() {
+  wifi_reconnect_count_++;
+  ESP_LOGI(TAG, "WiFi reconectado (#%d)", wifi_reconnect_count_);
+  publishHeartbeat();
+}
+
+void BalizamentoController::onMqttConnected() {
+  last_mqtt_connect_ms_ = (unsigned long)(esp_timer_get_time() / 1000);
+  last_mqtt_connect_time_ = time(nullptr);
+  mqtt_was_connected_ = true;
+  ESP_LOGI(TAG, "MQTT reconectado");
+  publishHeartbeat();
+}
+
+void BalizamentoController::onMqttDisconnected() {
+  mqtt_was_connected_ = false;
+  ESP_LOGW(TAG, "MQTT desconectado");
+}
+
+// ==================== HEARTBEAT ====================
+void BalizamentoController::publishHeartbeat() {
+  if (!esphome::mqtt::global_mqtt_client) return;
+  if (!esphome::mqtt::global_mqtt_client->is_connected()) return;
+
+  if (!heartbeat_initialized_) {
+    heartbeat_initialized_ = true;
+    // Cache app SHA256 once
+    char sha256_buf[65] = {0};
+    esp_ota_get_app_elf_sha256(sha256_buf, sizeof(sha256_buf));
+    app_sha256_ = sha256_buf;
+    // Load restart count from NVS
+    nvs_handle_t h;
+    if (nvs_open("heartbeat", NVS_READONLY, &h) == ESP_OK) {
+      int32_t v = 0;
+      nvs_get_i32(h, "restarts", &v);
+      restart_count_ = (int)v;
+      nvs_close(h);
+    }
+  }
+
+  int rssi; std::string ssid, ip, mac; bool wifi_ok;
+  getWiFiInfo(rssi, ssid, ip, mac, wifi_ok);
+
+  uint32_t uptime_sec = (uint32_t)(esp_timer_get_time() / 1000000);
+  uint32_t heap_free = (uint32_t)esp_get_free_heap_size();
+  uint32_t cpu_mhz = (uint32_t)(esp_clk_cpu_freq() / 1000000);
+  esp_reset_reason_t reset_reason = esp_reset_reason();
+
+  const char *reset_str = "Desconhecido";
+  switch (reset_reason) {
+    case ESP_RST_POWERON: reset_str = "Power On"; break;
+    case ESP_RST_EXT: reset_str = "External Pin"; break;
+    case ESP_RST_SW: reset_str = "Software Restart"; break;
+    case ESP_RST_PANIC: reset_str = "Panic"; break;
+    case ESP_RST_INT_WDT: reset_str = "Interrupt WDT"; break;
+    case ESP_RST_TASK_WDT: reset_str = "Task WDT"; break;
+    case ESP_RST_WDT: reset_str = "Watchdog"; break;
+    case ESP_RST_DEEPSLEEP: reset_str = "Deep Sleep Wake"; break;
+    case ESP_RST_BROWNOUT: reset_str = "Brownout"; break;
+    case ESP_RST_SDIO: reset_str = "SDIO"; break;
+    default: break;
+  }
+
+  // Flash free - use data partition info
+  uint32_t flash_free = 0;
+  const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, NULL);
+  if (part) {
+    flash_free = part->size;
+  }
+
+  // Internal temperature via ESP32-Sensor
+  float internal_temp = NAN;
+  esp_err_t temp_err = ESP_FAIL;
+#if CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+  temp_err = esp_temp_sens_read_celsius(&internal_temp);
+#else
+  (void)temp_err;
+#endif
+
+  // Gateway and DNS
+  std::string gateway = "Desconhecido";
+  std::string dns = "Desconhecido";
+  esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (netif) {
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(netif, &info) == ESP_OK) {
+      char buf[16];
+      esp_ip4addr_ntoa(&info.gw, buf, sizeof(buf));
+      gateway = buf;
+    }
+    esp_netif_dns_info_t dns_info;
+    if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_info) == ESP_OK) {
+      char buf[16];
+      esp_ip4addr_ntoa(&dns_info.ip.u_addr.ip4, buf, sizeof(buf));
+      dns = buf;
+    }
+  }
+
+  // WiFi quality %
+  int wifi_quality = 0;
+  if (rssi <= -100) wifi_quality = 0;
+  else if (rssi >= -50) wifi_quality = 100;
+  else wifi_quality = 2 * (rssi + 100);
+
+  DynamicJsonDocument doc(4096);
+
+  JsonObject device = doc.createNestedObject("device");
+  device["nome"] = esphome::App.get_friendly_name();
+  device["modelo"] = "ESP32";
+  device["serial"] = DEVICE_SERIAL;
+  device["hardware"] = DEVICE_HARDWARE;
+  device["mac"] = mac;
+  device["ip"] = ip;
+  device["hostname"] = esphome::App.get_name();
+  device["esphome_version"] = ESPHOME_VERSION;
+
+  JsonObject firmware = doc.createNestedObject("firmware");
+  firmware["versao"] = FIRMWARE_VERSION;
+  firmware["arquivo_bin"] = FIRMWARE_BIN;
+  firmware["build_date"] = std::string(__DATE__) + " " + std::string(__TIME__);
+  firmware["md5"] = app_sha256_;
+  firmware["ota_channel"] = FIRMWARE_OTA_CHANNEL;
+  firmware["ota_disponivel"] = false;
+
+  JsonObject wifi_obj = doc.createNestedObject("wifi");
+  wifi_obj["ssid"] = wifi_ok ? ssid : "Desconhecido";
+  wifi_obj["rssi"] = rssi;
+  wifi_obj["qualidade"] = wifi_quality;
+  wifi_obj["ip"] = ip;
+  wifi_obj["gateway"] = gateway;
+  wifi_obj["dns"] = dns;
+  wifi_obj["mac"] = mac;
+  wifi_obj["reconexoes"] = wifi_reconnect_count_;
+
+  bool mqtt_ok = esphome::mqtt::global_mqtt_client &&
+                  esphome::mqtt::global_mqtt_client->is_connected();
+  JsonObject mqtt_obj = doc.createNestedObject("mqtt");
+  mqtt_obj["broker"] = strlen(saved_config_.mqtt_broker) > 0 ? saved_config_.mqtt_broker : "broker.emqx.io";
+  mqtt_obj["status"] = mqtt_ok ? "Conectado" : "Desconectado";
+  mqtt_obj["mensagens_publicadas"] = mqtt_published_count_;
+  mqtt_obj["mensagens_recebidas"] = mqtt_received_count_;
+  if (last_mqtt_connect_time_ > 0) {
+    struct tm *ti = localtime(&last_mqtt_connect_time_);
+    char buf[25];
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ti);
+    mqtt_obj["ultima_reconexao"] = buf;
+  } else {
+    mqtt_obj["ultima_reconexao"] = nullptr;
+  }
+
+  JsonObject bal = doc.createNestedObject("balizamento");
+  bal["status"] = relay_on_ ? "Ativo" : "Inativo";
+  bal["gpio"] = RELAY_PIN;
+  bal["ultimo_comando"] = last_command_.empty() ? "Nenhum" : last_command_;
+  bal["ultimo_acionamento"] = last_activation_timestamp_.empty() ? nullptr : last_activation_timestamp_;
+  bal["tempo_ligado_segundos"] = total_on_time_ms_ / 1000;
+  bal["contador_acionamentos"] = activation_count_;
+
+  JsonObject sistema = doc.createNestedObject("sistema");
+  sistema["uptime_segundos"] = uptime_sec;
+  sistema["reinicios"] = restart_count_;
+  sistema["motivo_ultimo_reset"] = reset_str;
+  sistema["heap_livre"] = heap_free;
+  sistema["cpu_mhz"] = cpu_mhz;
+  if (!std::isnan(internal_temp)) {
+    sistema["temperatura_interna"] = (double)internal_temp;
+  } else {
+    sistema["temperatura_interna"] = nullptr;
+  }
+  sistema["flash_livre"] = flash_free;
+
+  time_t now = time(nullptr);
+  struct tm *ti = localtime(&now);
+  char ts_buf[25];
+  strftime(ts_buf, sizeof(ts_buf), "%Y-%m-%dT%H:%M:%S", ti);
+  doc["timestamp"] = ts_buf;
+
+  std::string out;
+  serializeJson(doc, out);
+  mqtt_published_count_++;
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]", HEARTBEAT_TOPIC);
+  esphome::mqtt::global_mqtt_client->publish(HEARTBEAT_TOPIC, out);
+}
+
+// ==================== HISTORICO ====================
+void BalizamentoController::loadHistory() {
+  history_.clear();
+  esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle_);
+  if (err != ESP_OK) return;
+  int32_t count = 0;
+  nvs_get_i32(nvs_handle_, "count", &count);
+  if (count > MAX_HISTORY) count = MAX_HISTORY;
+  for (int32_t i = 0; i < count; i++) {
+    char key[16]; snprintf(key, sizeof(key), "rec_%ld", (long)i);
+    size_t sz = 0;
+    if (nvs_get_blob(nvs_handle_, key, NULL, &sz) != ESP_OK || sz != sizeof(HistoryEntry)) continue;
+    HistoryEntry e;
+    if (nvs_get_blob(nvs_handle_, key, &e, &sz) == ESP_OK) {
+      history_.push_back(e);
+    }
+  }
+  nvs_close(nvs_handle_);
+  ESP_LOGI(TAG, "Historico: %d registros", history_.size());
+}
+
+void BalizamentoController::saveHistory() {
+  esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle_);
+  if (err != ESP_OK) return;
+  int32_t count = (int32_t)history_.size();
+  nvs_set_i32(nvs_handle_, "count", count);
+  for (int32_t i = 0; i < count && i < MAX_HISTORY; i++) {
+    char key[16]; snprintf(key, sizeof(key), "rec_%ld", (long)i);
+    nvs_set_blob(nvs_handle_, key, &history_[i], sizeof(HistoryEntry));
+  }
+  nvs_commit(nvs_handle_);
+  nvs_close(nvs_handle_);
+}
+
+void BalizamentoController::addHistory(uint32_t dur, float energy, bool completed, bool has_energy) {
+  HistoryEntry e;
+  e.timestamp = (uint32_t)time(nullptr);
+  e.duration_sec = dur;
+  e.energy_kwh = energy;
+  e.completed = completed;
+  e.has_energy = has_energy;
+  history_.insert(history_.begin(), e);
+  if (history_.size() > MAX_HISTORY) history_.pop_back();
+  saveHistory();
+}
+
+// ==================== OTA ====================
+void BalizamentoController::performOTA(const std::string &url) {
+  ESP_LOGI(TAG, "OTA: %s", url.c_str());
+
+  esp_http_client_config_t cfg = {};
+  cfg.url = url.c_str();
+  cfg.timeout_ms = 30000;
+  cfg.keep_alive_enable = false;
+
+  esp_http_client_handle_t client = esp_http_client_init(&cfg);
+  esp_err_t err = esp_http_client_open(client, 0);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "HTTP open falhou: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    return;
+  }
+
+  int content_len = esp_http_client_fetch_headers(client);
+  if (content_len <= 0) {
+    ESP_LOGE(TAG, "Content-Length invalido: %d", content_len);
+    esp_http_client_cleanup(client);
+    return;
+  }
+
+  const esp_partition_t *update_part = esp_ota_get_next_update_partition(NULL);
+  if (!update_part) {
+    ESP_LOGE(TAG, "Nenhuma particao OTA");
+    esp_http_client_cleanup(client);
+    return;
+  }
+
+  esp_ota_handle_t update_handle;
+  err = esp_ota_begin(update_part, content_len, &update_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "esp_ota_begin: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    return;
+  }
+
+  uint8_t buf[1024];
+  int written = 0;
+  while (written < content_len) {
+    int r = esp_http_client_read(client, (char *)buf, sizeof(buf));
+    if (r <= 0) {
+      ESP_LOGE(TAG, "Leitura HTTP: %d", r);
+      break;
+    }
+    err = esp_ota_write(update_handle, buf, r);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "esp_ota_write: %s", esp_err_to_name(err));
+      break;
+    }
+    written += r;
+  }
+
+  esp_http_client_cleanup(client);
+
+  if (written == content_len) {
+    err = esp_ota_end(update_handle);
+    if (err == ESP_OK) {
+      err = esp_ota_set_boot_partition(update_part);
+      if (err == ESP_OK) {
+        ESP_LOGI(TAG, "OTA OK! %d bytes. Reiniciando...", written);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+      }
+    }
+  } else {
+    esp_ota_abort(update_handle);
+    ESP_LOGE(TAG, "OTA falhou: %d/%d bytes", written, content_len);
+  }
+}
+
+// ==================== TUYA ====================
+void BalizamentoController::initTuya() {
+  if (g_tuya_pid.empty() || g_tuya_did.empty()) {
+    ESP_LOGW(TAG, "Tuya nao configurado");
+    return;
+  }
+  ESP_LOGI(TAG, "Tuya placeholder - endpoint: %s", g_tuya_reg.c_str());
+  last_tuya_reconnect_ = 0;
+}
+
+void BalizamentoController::checkTuya() {
+  // Tuya MQTT with TLS requires significant setup
+  // Placeholder for future implementation
+}
+
+std::string BalizamentoController::tuyaHmacSha256(const std::string &key, const std::string &msg) {
+  uint8_t hmac[32];
+  mbedtls_md_context_t ctx;
+  mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
+  mbedtls_md_hmac_starts(&ctx, (const uint8_t *)key.data(), key.length());
+  mbedtls_md_hmac_update(&ctx, (const uint8_t *)msg.data(), msg.length());
+  mbedtls_md_hmac_finish(&ctx, hmac);
+  mbedtls_md_free(&ctx);
+
+  char hex[65];
+  for (int i = 0; i < 32; i++) snprintf(hex + (i * 2), 3, "%02x", hmac[i]);
+  hex[64] = 0;
+  return std::string(hex);
+}
+
+// ==================== CONFIG NVS ====================
+void BalizamentoController::loadSavedConfig() {
+  SavedConfig cfg = {};
+  esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle_);
+  if (err != ESP_OK) { saved_config_ = cfg; return; }
+
+  size_t sz;
+  sz = sizeof(cfg.wifi_ssid);
+  nvs_get_str(nvs_handle_, "wifi_ssid", cfg.wifi_ssid, &sz);
+  sz = sizeof(cfg.wifi_password);
+  nvs_get_str(nvs_handle_, "wifi_pass", cfg.wifi_password, &sz);
+  sz = sizeof(cfg.mqtt_broker);
+  nvs_get_str(nvs_handle_, "mqtt_broker", cfg.mqtt_broker, &sz);
+  uint16_t port = 0;
+  nvs_get_u16(nvs_handle_, "mqtt_port", &port);
+  cfg.mqtt_port = port;
+  sz = sizeof(cfg.mqtt_username);
+  nvs_get_str(nvs_handle_, "mqtt_user", cfg.mqtt_username, &sz);
+  sz = sizeof(cfg.mqtt_password);
+  nvs_get_str(nvs_handle_, "mqtt_pass", cfg.mqtt_password, &sz);
+
+  nvs_close(nvs_handle_);
+  saved_config_ = cfg;
+  ESP_LOGI(TAG, "Config carregada - WiFi: %s, MQTT: %s", cfg.wifi_ssid, cfg.mqtt_broker);
+}
+
+void BalizamentoController::saveConfig(const SavedConfig &cfg) {
+  esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle_);
+  if (err != ESP_OK) return;
+
+  nvs_set_str(nvs_handle_, "wifi_ssid", cfg.wifi_ssid);
+  nvs_set_str(nvs_handle_, "wifi_pass", cfg.wifi_password);
+  nvs_set_str(nvs_handle_, "mqtt_broker", cfg.mqtt_broker);
+  nvs_set_u16(nvs_handle_, "mqtt_port", cfg.mqtt_port);
+  nvs_set_str(nvs_handle_, "mqtt_user", cfg.mqtt_username);
+  nvs_set_str(nvs_handle_, "mqtt_pass", cfg.mqtt_password);
+  nvs_commit(nvs_handle_);
+  nvs_close(nvs_handle_);
+
+  saved_config_ = cfg;
+  ESP_LOGI(TAG, "Config salva - WiFi: %s, MQTT: %s:%d", cfg.wifi_ssid, cfg.mqtt_broker, cfg.mqtt_port);
+}
+
+void BalizamentoController::reconnectWiFi() {
+  if (strlen(saved_config_.wifi_ssid) == 0) return;
+  ESP_LOGI(TAG, "Reconectando WiFi para %s", saved_config_.wifi_ssid);
+
+  wifi_config_t wifi_cfg = {};
+  strncpy((char*)wifi_cfg.sta.ssid, saved_config_.wifi_ssid, sizeof(wifi_cfg.sta.ssid) - 1);
+  strncpy((char*)wifi_cfg.sta.password, saved_config_.wifi_password, sizeof(wifi_cfg.sta.password) - 1);
+
+  esp_wifi_disconnect();
+  esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+  esp_wifi_connect();
+}
+
+void BalizamentoController::ensureAP() {
+  wifi_mode_t mode;
+  esp_wifi_get_mode(&mode);
+  if (mode == WIFI_MODE_APSTA || mode == WIFI_MODE_AP) {
+    ap_started_ = true;
+    return;
+  }
+
+  ESP_LOGI(TAG, "Iniciando AP manualmente");
+  wifi_config_t ap_cfg = {};
+  strcpy((char*)ap_cfg.ap.ssid, "AeroControl");
+  strcpy((char*)ap_cfg.ap.password, "123456789");
+  ap_cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  ap_cfg.ap.max_connection = 4;
+
+  esp_wifi_set_mode(WIFI_MODE_APSTA);
+  esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+  ap_started_ = true;
+  ESP_LOGI(TAG, "AP AeroControl iniciado");
+}
+
+// ==================== CALLBACKS DO YAML ====================
+void balizamento_on_message(const std::string &payload, float energia) {
+  if (g_controller) g_controller->handleBalCommand(payload, energia);
+}
+
+void sdm120_on_message(const std::string &payload) {
+  if (!g_controller) return;
+  g_controller->mqtt_received_count_++;
+  ESP_LOGI(TAG, "MQTT RECEBIDO [%s]: %s", SDM_WRITE_TOPIC, payload.c_str());
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, payload) == DeserializationError::Ok) {
+    const char *cmd = doc["comando"];
+    if (cmd && strcmp(cmd, "ReadRegistersEnergy") == 0) {
+      g_controller->publishEnergyRegisters();
+    }
+  }
+}

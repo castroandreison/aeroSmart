@@ -31,6 +31,7 @@ static const char *TAG = "balizamento";
 #define SDM_WRITE_BASE   "SDM120/Write/"
 #define HEARTBEAT_BASE   "Heartbeat/"
 #define RELAY_PIN        GPIO_NUM_2
+#define MANUAL_PIN       GPIO_NUM_4
 #define MAX_HISTORY      10
 #define NVS_NAMESPACE    "balizamento"
 
@@ -144,6 +145,7 @@ th{color:#8892a4;font-size:11px;text-transform:uppercase}
 <span class="badge badge-off" id="relayBadge">Desligado</span>
 <span class="badge badge-off" id="wifiBadge">WiFi</span>
 <span class="badge badge-off" id="mqttBadge">MQTT</span>
+<span class="badge badge-off" id="modeBadge">Auto</span>
 </div>
 <div class="timestamp" id="ipDisplay"></div>
 <div id="wifiDetail"></div>
@@ -262,6 +264,9 @@ async function fetchStatus(){
   }
   document.getElementById('mqttBadge').textContent=d.mqtt?'MQTT OK':'MQTT:(';
   document.getElementById('mqttBadge').className='badge '+(d.mqtt?'badge-on':'badge-err');
+  const manual=d.modo_manual;
+  document.getElementById('modeBadge').textContent=manual?'Manual':'Auto';
+  document.getElementById('modeBadge').className='badge '+(manual?'badge-warn':'badge-on');
   document.getElementById('ipDisplay').textContent='IP: '+d.ip;
   if(d.energy){
     document.getElementById('rTensao').textContent=d.energy.tensao||'--';
@@ -409,6 +414,7 @@ class BalizamentoController : public esphome::Component {
   unsigned long last_duration_sec_ = 0;
   bool has_energy_data_ = false;
   unsigned long last_ms_ = 0;
+  bool isManualMode() { return gpio_get_level(MANUAL_PIN) == 1; }
 
  public:
   BalizamentoController() {}
@@ -580,6 +586,8 @@ void BalizamentoController::setup() {
   gpio_set_direction(RELAY_PIN, GPIO_MODE_OUTPUT);
   gpio_set_level(RELAY_PIN, 0);
   relay_on_ = false;
+  gpio_set_direction(MANUAL_PIN, GPIO_MODE_INPUT);
+  gpio_set_pull_mode(MANUAL_PIN, GPIO_PULLDOWN_ONLY);
 
   loadHistory();
   loadSavedConfig();
@@ -733,6 +741,7 @@ esp_err_t BalizamentoController::handleApiStatus(httpd_req_t *req) {
   doc["saved_ssid"] = c.saved_config_.wifi_ssid;
   doc["saved_broker"] = c.saved_config_.mqtt_broker;
   doc["wifi_configured"] = strlen(c.saved_config_.wifi_ssid) > 0;
+  doc["modo_manual"] = c.isManualMode();
 
   doc["timestamp"] = fmtTimestamp(::time(nullptr));
 
@@ -903,18 +912,24 @@ esp_err_t BalizamentoController::handleApiScan(httpd_req_t *req) {
 
   wifi_mode_t mode;
   esp_wifi_get_mode(&mode);
+  ESP_LOGI(TAG, "Modo WiFi atual: %d", mode);
+
   if (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA) {
-    esp_wifi_set_mode(WIFI_MODE_APSTA);
-    delay(100);
+    ESP_LOGI(TAG, "Alterando modo para APSTA");
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    delay(200);
   }
+
+  // Limpar scan anterior
+  esp_wifi_scan_stop();
 
   wifi_scan_config_t conf = {};
   conf.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-  conf.scan_time.active.min = 120;
-  conf.scan_time.active.max = 300;
-  conf.show_hidden = false;
+  conf.scan_time.active.min = 200;
+  conf.scan_time.active.max = 500;
+  conf.show_hidden = true;
 
-  esp_err_t err = esp_wifi_scan_start(&conf, true);
+  esp_err_t err = esp_wifi_scan_start(&conf, false);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Falha no scan: %s", esp_err_to_name(err));
     const char *resp = "{\"error\":\"scan_failed\"}";
@@ -924,8 +939,12 @@ esp_err_t BalizamentoController::handleApiScan(httpd_req_t *req) {
   }
 
   uint16_t count = 0;
-  esp_wifi_scan_get_ap_num(&count);
-  ESP_LOGI(TAG, "Scan concluido: %d redes encontradas", count);
+  for (int retry = 0; retry < 50; retry++) {
+    delay(100);
+    esp_wifi_scan_get_ap_num(&count);
+    if (count > 0) break;
+  }
+  ESP_LOGI(TAG, "Scan concluido: %d redes", count);
   if (count > 50) count = 50;
 
   JsonDocument doc;
@@ -941,10 +960,7 @@ esp_err_t BalizamentoController::handleApiScan(httpd_req_t *req) {
         net["ssid"] = (char *)recs[i].ssid;
         net["rssi"] = recs[i].rssi;
         net["channel"] = recs[i].primary;
-        switch (recs[i].authmode) {
-          case WIFI_AUTH_OPEN: net["auth"] = "aberta"; break;
-          default: net["auth"] = "protegida"; break;
-        }
+        net["auth"] = (recs[i].authmode == WIFI_AUTH_OPEN) ? "aberta" : "protegida";
       }
       free(recs);
     }
@@ -1235,13 +1251,13 @@ void BalizamentoController::publishHeartbeat() {
   DynamicJsonDocument doc(4096);
 
   JsonObject device = doc.createNestedObject("device");
-  device["nome"] = esphome::App.get_friendly_name();
+  device["nome"] = esphome::App.get_friendly_name().c_str();
   device["modelo"] = "ESP32";
   device["serial"] = DEVICE_SERIAL;
   device["hardware"] = DEVICE_HARDWARE;
   device["mac"] = mac;
   device["ip"] = ip;
-  device["hostname"] = esphome::App.get_name();
+  device["hostname"] = esphome::App.get_name().c_str();
   device["esphome_version"] = ESPHOME_VERSION;
 
   JsonObject firmware = doc.createNestedObject("firmware");
@@ -1282,9 +1298,14 @@ void BalizamentoController::publishHeartbeat() {
   bal["status"] = relay_on_ ? "Ativo" : "Inativo";
   bal["gpio"] = RELAY_PIN;
   bal["ultimo_comando"] = last_command_.empty() ? "Nenhum" : last_command_;
-  bal["ultimo_acionamento"] = last_activation_timestamp_.empty() ? nullptr : last_activation_timestamp_;
+  if (last_activation_timestamp_.empty()) {
+    bal["ultimo_acionamento"] = nullptr;
+  } else {
+    bal["ultimo_acionamento"] = last_activation_timestamp_;
+  }
   bal["tempo_ligado_segundos"] = total_on_time_ms_ / 1000;
   bal["contador_acionamentos"] = activation_count_;
+  bal["modo_manual"] = isManualMode();
 
   JsonObject sistema = doc.createNestedObject("sistema");
   sistema["uptime_segundos"] = uptime_sec;

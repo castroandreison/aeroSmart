@@ -176,8 +176,8 @@ th{color:#8892a4;font-size:11px;text-transform:uppercase}
 <div class="card">
 <h2>Historico</h2>
 <table>
-<thead><tr><th>Data</th><th>Duracao</th><th>Consumo</th><th>Status</th></tr></thead>
-<tbody id="historyBody"><tr><td colspan="4">Carregando...</td></tr></tbody>
+<thead><tr><th>Data</th><th>Horario Inicio</th><th>Horario Fim</th><th>Duracao</th><th>Consumo</th><th>Status</th></tr></thead>
+<tbody id="historyBody"><tr><td colspan="6">Carregando...</td></tr></tbody>
 </table>
 </div>
 <div class="card">
@@ -285,13 +285,13 @@ async function fetchHistory(){
   const tbody=document.getElementById('historyBody');
   tbody.innerHTML='';
   if(!d.history||d.history.length===0){
-    tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#5a6a7e">Nenhum registro</td></tr>';
+    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:#5a6a7e">Nenhum registro</td></tr>';
     return;
   }
   for(const h of d.history){
     const tr=document.createElement('tr');
     const e=h.has_energy?h.energy_kwh.toFixed(3):'--';
-    tr.innerHTML='<td>'+h.date+'</td><td>'+fmtTime(h.duration_sec)+'</td><td>'+e+' kWh</td><td>'+(h.completed?'OK':'Interrompido')+'</td>';
+    tr.innerHTML='<td>'+h.date+'</td><td>'+h.start_time+'</td><td>'+h.end_time+'</td><td>'+fmtTime(h.duration_sec)+'</td><td>'+e+' kWh</td><td>'+(h.completed?'OK':'Interrompido')+'</td>';
     tbody.appendChild(tr);
   }
 }
@@ -487,6 +487,9 @@ class BalizamentoController : public esphome::Component {
   // Heartbeat tracking
   int mqtt_published_count_ = 0;
   int mqtt_received_count_ = 0;
+  bool has_pending_consumption_ = false;
+  float pending_consumption_kwh_ = 0;
+  unsigned long pending_duration_sec_ = 0;
   int wifi_reconnect_count_ = 0;
   int restart_count_ = 0;
   int activation_count_ = 0;
@@ -575,6 +578,14 @@ std::string BalizamentoController::fmtDate(time_t t) {
   struct tm *ti = localtime(&t);
   char buf[12];
   snprintf(buf, sizeof(buf), "%02d/%02d/%04d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900);
+  return std::string(buf);
+}
+
+static std::string fmtTime(time_t t) {
+  if (t < 100000) return std::string("--:--:--");
+  struct tm *ti = localtime(&t);
+  char buf[10];
+  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", ti->tm_hour, ti->tm_min, ti->tm_sec);
   return std::string(buf);
 }
 
@@ -795,6 +806,8 @@ esp_err_t BalizamentoController::handleApiHistory(httpd_req_t *req) {
   for (const auto &h : c.history_) {
     JsonObject o = arr.createNestedObject();
     o["date"] = fmtDate(h.timestamp);
+    o["start_time"] = fmtTime(h.timestamp - h.duration_sec);
+    o["end_time"] = fmtTime(h.timestamp);
     o["duration_sec"] = h.duration_sec;
     o["energy_kwh"] = h.energy_kwh;
     o["completed"] = h.completed;
@@ -1073,6 +1086,15 @@ void BalizamentoController::publishStatus() {
 
 void BalizamentoController::publishConsumption(float diff_kwh, unsigned long dur_sec) {
   if (!esphome::mqtt::global_mqtt_client) return;
+  bool connected = esphome::mqtt::global_mqtt_client->is_connected();
+  if (!connected) {
+    has_pending_consumption_ = true;
+    pending_consumption_kwh_ = diff_kwh;
+    pending_duration_sec_ = dur_sec;
+    ESP_LOGW(TAG, "MQTT desconectado, consumo pendente salvo");
+    return;
+  }
+  has_pending_consumption_ = false;
   StaticJsonDocument<512> doc;
   doc["comando"] = "ConsumoBalizamento";
   doc["energia_inicial_kwh"] = energy_start_kwh_;
@@ -1156,6 +1178,15 @@ void BalizamentoController::onMqttConnected() {
     ESP_LOGI(TAG, "Inscrito em: %s / %s", bal_write_topic_.c_str(), sdm_write_topic_.c_str());
   }
   publishHeartbeat();
+
+  // Reenviar consumo pendente se houver
+  if (has_pending_consumption_) {
+    ESP_LOGI(TAG, "Reenviando consumo pendente: %.3fkWh %lus", pending_consumption_kwh_, pending_duration_sec_);
+    float saved_diff = pending_consumption_kwh_;
+    unsigned long saved_dur = pending_duration_sec_;
+    has_pending_consumption_ = false;
+    publishConsumption(saved_diff, saved_dur);
+  }
 }
 
 void BalizamentoController::onMqttDisconnected() {

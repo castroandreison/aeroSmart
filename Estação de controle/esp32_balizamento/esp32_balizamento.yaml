@@ -39,6 +39,15 @@ wifi:
     - lambda: |-
         if (g_controller) g_controller->onWiFiConnected();
 
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "America/Sao_Paulo"
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+      - 2.pool.ntp.org
+
 captive_portal:
 
 logger:
@@ -64,19 +73,6 @@ mqtt:
   on_disconnect:
     - lambda: |-
         if (g_controller) g_controller->onMqttDisconnected();
-  on_message:
-    - topic: "Bal/Write/AeroClub Central"
-      then:
-        - lambda: |-
-            float energia_atual = NAN;
-            if (!std::isnan(id(energia_importada).state)) {
-              energia_atual = id(energia_importada).state;
-            }
-            if (g_controller) g_controller->handleBalCommand(x, energia_atual);
-    - topic: "SDM120/Write/AeroClub Central"
-      then:
-        - lambda: |-
-            if (g_controller) sdm120_on_message(x);
 
 ota:
   platform: esphome

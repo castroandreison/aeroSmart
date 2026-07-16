@@ -1,7 +1,6 @@
-﻿{
-    "min_esphome_version":  "2026.6.5",
-    "esp_platform":  "ESP32",
-    "version":  "1.0.0",
-    "build_time":  "2026-07-15T14:54:48",
-    "project":  "AeroControl Balizamento"
-}
+{
+    ""min_esphome_version"": ""2026.6.5"",
+    ""esp_platform"": ""ESP32"",
+    ""version"": ""1.0.0"",
+    ""build_time"": ""--T::"",
+    ""project"": ""AeroControl Balizamento"" "}

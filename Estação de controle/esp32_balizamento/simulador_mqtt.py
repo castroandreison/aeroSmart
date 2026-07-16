@@ -9,6 +9,7 @@ TOPIC_BAL_WRITE = "Bal/Write/AeroClub Central"
 TOPIC_BAL_READ = "Bal/Read/AeroClub Central"
 TOPIC_SDM_WRITE = "SDM120/Write/AeroClub Central"
 TOPIC_SDM_READ = "SDM120/Read/AeroClub Central"
+TOPIC_HEARTBEAT = "Heartbeat/AeroClub Central"
 FIRMWARE_URL = "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.ota.bin"
 
 def on_connect(client, userdata, flags, rc, *extra):
@@ -16,6 +17,7 @@ def on_connect(client, userdata, flags, rc, *extra):
         print(f"Conectado ao broker {BROKER}:{PORT}")
         client.subscribe(TOPIC_BAL_READ)
         client.subscribe(TOPIC_SDM_READ)
+        client.subscribe(TOPIC_HEARTBEAT)
     else:
         print(f"Falha na conexao: {rc}")
 
@@ -26,7 +28,7 @@ def on_message(client, userdata, msg):
     except:
         print(f"[RECEBIDO] {msg.topic}: {msg.payload.decode()}")
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client = mqtt.Client()
 client.on_connect = on_connect
 client.on_message = on_message
 
@@ -53,7 +55,7 @@ def menu():
     print("  3 - BalOn com agendamento (X minutos)")
     print("  4 - UpdateFirmware (OTA via GitLab)")
     print("  5 - ReadRegistersEnergy (ler SDM120)")
-    print("  6 - Enviar JSON personalizado")
+    print("  6 - Solicitar Heartbeat")
     print("  0 - Sair")
     print("-"*60)
 
@@ -89,13 +91,8 @@ try:
             send(TOPIC_SDM_WRITE, {"comando": "ReadRegistersEnergy"})
 
         elif op == "6":
-            topic = input("Topico: ").strip()
-            payload_raw = input("JSON: ").strip()
-            try:
-                payload = json.loads(payload_raw)
-                send(topic, payload)
-            except:
-                print("JSON invalido")
+            send(TOPIC_BAL_WRITE, {"comando": "RequestHeartbeat"})
+            print("  -> Heartbeat solicitado. Aguardando resposta...")
 
         elif op == "0":
             break

@@ -25,12 +25,13 @@
 
 static const char *TAG = "balizamento";
 
-#define BAL_READ_TOPIC   "Bal/Read/AeroClub Central"
-#define BAL_WRITE_TOPIC  "Bal/Write/AeroClub Central"
-#define SDM_READ_TOPIC   "SDM120/Read/AeroClub Central"
-#define SDM_WRITE_TOPIC  "SDM120/Write/AeroClub Central"
+#define BAL_READ_BASE    "Bal/Read/"
+#define BAL_WRITE_BASE   "Bal/Write/"
+#define SDM_READ_BASE    "SDM120/Read/"
+#define SDM_WRITE_BASE   "SDM120/Write/"
+#define HEARTBEAT_BASE   "Heartbeat/"
 #define RELAY_PIN        GPIO_NUM_2
-#define MAX_HISTORY      50
+#define MAX_HISTORY      10
 #define NVS_NAMESPACE    "balizamento"
 
 #ifndef TUYA_PRODUCT_ID
@@ -65,9 +66,7 @@ static std::string g_tuya_reg = TUYA_REGION;
 #ifndef FIRMWARE_OTA_CHANNEL
 #define FIRMWARE_OTA_CHANNEL "stable"
 #endif
-#ifndef HEARTBEAT_TOPIC
-#define HEARTBEAT_TOPIC "Heartbeat/AeroClub Central"
-#endif
+
 #ifndef FIRMWARE_VERSION_URL
 #define FIRMWARE_VERSION_URL "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/version.json"
 #endif
@@ -86,6 +85,7 @@ static std::string g_tuya_reg = TUYA_REGION;
 
 class BalizamentoController;
 extern BalizamentoController *g_controller;
+void sdm120_on_message(const std::string &payload);
 
 struct ActivationRecord {
   char timestamp[20];
@@ -182,12 +182,41 @@ th{color:#8892a4;font-size:11px;text-transform:uppercase}
 <h2>Configuracoes</h2>
 <div style="display:flex;gap:4px;margin-bottom:12px">
 <button class="btn-primary" style="flex:1;font-size:13px;padding:6px" onclick="showTab('rede')">Rede</button>
+<button class="btn-primary" style="flex:1;font-size:13px;padding:6px" onclick="showTab('mqtt')">MQTT</button>
 <button class="btn-primary" style="flex:1;font-size:13px;padding:6px" onclick="showTab('geral')">Geral</button>
 </div>
 <div id="tabRede">
 <div style="display:grid;gap:8px">
 <input type="text" id="cfgSsid" placeholder="WiFi SSID">
 <input type="password" id="cfgPass" placeholder="WiFi Senha">
+<button class="btn-primary" style="font-size:13px;padding:6px" onclick="scanNetworks()">Buscar Redes</button>
+<select id="netList" style="display:none;padding:6px;border-radius:8px;border:1px solid #2a3346;background:#0b0e14;color:#e0e4ec" onchange="document.getElementById('cfgSsid').value=this.value"></select>
+<button class="btn-on" onclick="saveConfig()">Salvar e Reiniciar</button>
+</div>
+</div>
+<div id="tabMqtt" style="display:none">
+<div style="display:grid;gap:8px">
+<input type="text" id="cfgBroker" placeholder="MQTT Broker (ex: broker.emqx.io)">
+<input type="number" id="cfgPort" placeholder="MQTT Port (1883)" min="1" max="65535">
+<input type="text" id="cfgSuffix" placeholder="Sufixo topico (ex: AeroClub Central)">
+<select id="cfgTz">
+<option value="America/Sao_Paulo">America/Sao_Paulo (BRT)</option>
+<option value="America/Manaus">America/Manaus (AMT)</option>
+<option value="America/Belem">America/Belem (BRT)</option>
+<option value="America/Fortaleza">America/Fortaleza (BRT)</option>
+<option value="America/Noronha">America/Noronha (FNT)</option>
+<option value="America/Boa_Vista">America/Boa_Vista (AMT)</option>
+<option value="America/Cuiaba">America/Cuiaba (AMT)</option>
+<option value="America/Campo_Grande">America/Campo_Grande (AMT)</option>
+<option value="America/Santarem">America/Santarem (BRT)</option>
+<option value="America/Porto_Velho">America/Porto_Velho (AMT)</option>
+<option value="America/Rio_Branco">America/Rio_Branco (ACT)</option>
+<option value="America/Maceio">America/Maceio (BRT)</option>
+<option value="-03">UTC-3 (Brasilia)</option>
+<option value="-04">UTC-4 (Amazonas)</option>
+<option value="-05">UTC-5 (Acre)</option>
+<option value="-02">UTC-2 (Fernando Noronha)</option>
+</select>
 <button class="btn-on" onclick="saveConfig()">Salvar e Reiniciar</button>
 </div>
 </div>
@@ -278,21 +307,53 @@ async function restartESP(){
   if(!confirm('Reiniciar dispositivo?'))return;
   await fetch('/api/restart',{method:'POST'});
 }
+async function scanNetworks(){
+  const btn=document.querySelector('[onclick="scanNetworks()"]');
+  btn.textContent='Buscando...';
+  btn.disabled=true;
+  const d=await fetchJSON('/api/scan');
+  btn.textContent='Buscar Redes';
+  btn.disabled=false;
+  const sel=document.getElementById('netList');
+  sel.innerHTML='<option value="">-- Selecione uma rede --</option>';
+  if(d&&d.networks){
+    const seen={};
+    for(const n of d.networks){
+      if(!n.ssid||seen[n.ssid])continue;
+      seen[n.ssid]=true;
+      const o=document.createElement('option');
+      o.value=n.ssid;
+      o.textContent=n.ssid+(n.auth=='protegida'?' 🔒':' 🔓')+' ('+n.rssi+' dBm)';
+      sel.appendChild(o);
+    }
+  }
+  sel.style.display='block';
+}
 function showTab(tab){
   document.getElementById('tabRede').style.display=tab==='rede'?'block':'none';
+  document.getElementById('tabMqtt').style.display=tab==='mqtt'?'block':'none';
   document.getElementById('tabGeral').style.display=tab==='geral'?'block':'none';
 }
 async function loadConfig(){
   const d=await fetchJSON('/api/config');
   if(!d)return;
   document.getElementById('cfgSsid').value=d.wifi_ssid||'';
+  document.getElementById('cfgBroker').value=d.mqtt_broker||'';
+  document.getElementById('cfgPort').value=d.mqtt_port||1883;
+  document.getElementById('cfgSuffix').value=d.mqtt_topic_suffix||'AeroClub Central';
+  if(d.timezone){
+    const sel=document.getElementById('cfgTz');
+    for(let o of sel.options)if(o.value===d.timezone){o.selected=true;break}
+  }
 }
 async function saveConfig(){
   const body={
     wifi_ssid:document.getElementById('cfgSsid').value.trim(),
     wifi_password:document.getElementById('cfgPass').value,
-    mqtt_broker:'broker.emqx.io',
-    mqtt_port:1883,
+    mqtt_broker:document.getElementById('cfgBroker').value.trim(),
+    mqtt_port:parseInt(document.getElementById('cfgPort').value)||1883,
+    mqtt_topic_suffix:document.getElementById('cfgSuffix').value.trim(),
+    timezone:document.getElementById('cfgTz').value,
     mqtt_username:'',
     mqtt_password:''
   };
@@ -327,6 +388,8 @@ struct SavedConfig {
   uint16_t mqtt_port;
   char mqtt_username[65];
   char mqtt_password[65];
+  char mqtt_topic_suffix[65];
+  char timezone[33];
 };
 
 class BalizamentoController : public esphome::Component {
@@ -373,7 +436,7 @@ class BalizamentoController : public esphome::Component {
   void loadSavedConfig();
   void saveConfig(const SavedConfig &cfg);
   void reconnectWiFi();
-  void ensureAP();
+  void startAP();
 
   static void setTuyaConfig(const char *pid, const char *did, const char *cid, const char *sec, const char *reg) {
     if (pid) g_tuya_pid = pid;
@@ -391,6 +454,22 @@ class BalizamentoController : public esphome::Component {
   nvs_handle_t nvs_handle_;
   std::vector<HistoryEntry> history_;
   SavedConfig saved_config_;
+
+  std::string bal_read_topic_;
+  std::string bal_write_topic_;
+  std::string sdm_read_topic_;
+  std::string sdm_write_topic_;
+  std::string heartbeat_topic_;
+
+  void buildTopics() {
+    const char *suf = saved_config_.mqtt_topic_suffix;
+    if (strlen(suf) == 0) suf = "AeroClub Central";
+    bal_read_topic_  = std::string(BAL_READ_BASE)  + suf;
+    bal_write_topic_ = std::string(BAL_WRITE_BASE) + suf;
+    sdm_read_topic_  = std::string(SDM_READ_BASE)  + suf;
+    sdm_write_topic_ = std::string(SDM_WRITE_BASE) + suf;
+    heartbeat_topic_ = std::string(HEARTBEAT_BASE) + suf;
+  }
 
   void initWebServer();
   void checkTimer();
@@ -420,6 +499,7 @@ class BalizamentoController : public esphome::Component {
   void publishConsumption(float diff_kwh, unsigned long dur_sec);
   void publishEnergyRegisters();
   void incrementMqttReceivedCount() { mqtt_received_count_++; }
+  const std::string &getSdmWriteTopic() const { return sdm_write_topic_; }
 
   void initTuya();
   void checkTuya();
@@ -437,6 +517,7 @@ class BalizamentoController : public esphome::Component {
   static esp_err_t handleApiOTA(httpd_req_t *req);
   static esp_err_t handleApiRestart(httpd_req_t *req);
   static esp_err_t handleApiConfig(httpd_req_t *req);
+  static esp_err_t handleApiScan(httpd_req_t *req);
 };
 
 BalizamentoController *g_controller = nullptr;
@@ -502,7 +583,13 @@ void BalizamentoController::setup() {
 
   loadHistory();
   loadSavedConfig();
-  ensureAP();
+  buildTopics();
+  // Aplicar timezone
+  if (strlen(saved_config_.timezone) > 0) {
+    setenv("TZ", saved_config_.timezone, 1);
+    tzset();
+  }
+  ap_started_ = true; // AP gerenciado pelo YAML
   if (strlen(saved_config_.wifi_ssid) > 0) {
     reconnectWiFi();
   }
@@ -581,6 +668,7 @@ void BalizamentoController::initWebServer() {
       {"/api/restart",   HTTP_POST, handleApiRestart,   NULL},
       {"/api/config",    HTTP_GET,  handleApiConfig,    NULL},
       {"/api/config",    HTTP_POST, handleApiConfig,    NULL},
+      {"/api/scan",      HTTP_GET,  handleApiScan,       NULL},
     };
     for (auto &u : uris) httpd_register_uri_handler(server_, &u);
     ESP_LOGI(TAG, "Web server iniciado na porta 80");
@@ -646,7 +734,7 @@ esp_err_t BalizamentoController::handleApiStatus(httpd_req_t *req) {
   doc["saved_broker"] = c.saved_config_.mqtt_broker;
   doc["wifi_configured"] = strlen(c.saved_config_.wifi_ssid) > 0;
 
-  doc["timestamp"] = fmtTimestamp(time(nullptr));
+  doc["timestamp"] = fmtTimestamp(::time(nullptr));
 
   std::string out;
   serializeJson(doc, out);
@@ -752,6 +840,8 @@ esp_err_t BalizamentoController::handleApiConfig(httpd_req_t *req) {
     doc["mqtt_broker"] = c.saved_config_.mqtt_broker;
     doc["mqtt_port"] = c.saved_config_.mqtt_port;
     doc["mqtt_username"] = c.saved_config_.mqtt_username;
+    doc["mqtt_topic_suffix"] = strlen(c.saved_config_.mqtt_topic_suffix) > 0 ? c.saved_config_.mqtt_topic_suffix : "AeroClub Central";
+    doc["timezone"] = strlen(c.saved_config_.timezone) > 0 ? c.saved_config_.timezone : "America/Sao_Paulo";
 
     std::string out;
     serializeJson(doc, out);
@@ -786,6 +876,11 @@ esp_err_t BalizamentoController::handleApiConfig(httpd_req_t *req) {
   if (muser) strncpy(cfg.mqtt_username, muser, sizeof(cfg.mqtt_username) - 1);
   if (mpass) strncpy(cfg.mqtt_password, mpass, sizeof(cfg.mqtt_password) - 1);
 
+  const char *suffix = doc["mqtt_topic_suffix"];
+  const char *tz = doc["timezone"];
+  if (suffix) strncpy(cfg.mqtt_topic_suffix, suffix, sizeof(cfg.mqtt_topic_suffix) - 1);
+  if (tz) strncpy(cfg.timezone, tz, sizeof(cfg.timezone) - 1);
+
   c.saveConfig(cfg);
 
   bool needs_reboot = true;
@@ -795,6 +890,68 @@ esp_err_t BalizamentoController::handleApiConfig(httpd_req_t *req) {
 
   std::string out;
   serializeJson(resp, out);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+// ==================== WIFI SCAN ====================
+esp_err_t BalizamentoController::handleApiScan(httpd_req_t *req) {
+  if (!g_controller) { httpd_resp_send_404(req); return ESP_FAIL; }
+
+  ESP_LOGI(TAG, "Iniciando scan WiFi...");
+
+  wifi_mode_t mode;
+  esp_wifi_get_mode(&mode);
+  if (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA) {
+    esp_wifi_set_mode(WIFI_MODE_APSTA);
+    delay(100);
+  }
+
+  wifi_scan_config_t conf = {};
+  conf.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+  conf.scan_time.active.min = 120;
+  conf.scan_time.active.max = 300;
+  conf.show_hidden = false;
+
+  esp_err_t err = esp_wifi_scan_start(&conf, true);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Falha no scan: %s", esp_err_to_name(err));
+    const char *resp = "{\"error\":\"scan_failed\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, strlen(resp));
+    return ESP_OK;
+  }
+
+  uint16_t count = 0;
+  esp_wifi_scan_get_ap_num(&count);
+  ESP_LOGI(TAG, "Scan concluido: %d redes encontradas", count);
+  if (count > 50) count = 50;
+
+  JsonDocument doc;
+  JsonArray nets = doc["networks"].to<JsonArray>();
+
+  if (count > 0) {
+    wifi_ap_record_t *recs = (wifi_ap_record_t *)malloc(sizeof(wifi_ap_record_t) * count);
+    if (recs) {
+      esp_wifi_scan_get_ap_records(&count, recs);
+      for (int i = 0; i < count; i++) {
+        if (strlen((char *)recs[i].ssid) == 0) continue;
+        JsonObject net = nets.add<JsonObject>();
+        net["ssid"] = (char *)recs[i].ssid;
+        net["rssi"] = recs[i].rssi;
+        net["channel"] = recs[i].primary;
+        switch (recs[i].authmode) {
+          case WIFI_AUTH_OPEN: net["auth"] = "aberta"; break;
+          default: net["auth"] = "protegida"; break;
+        }
+      }
+      free(recs);
+    }
+  }
+
+  std::string out;
+  serializeJson(doc, out);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_send(req, out.c_str(), out.length());
   return ESP_OK;
@@ -838,7 +995,7 @@ void BalizamentoController::finishActivation(bool completed) {
 // ==================== COMANDOS ====================
 void BalizamentoController::handleBalCommand(const std::string &payload, float energia) {
   mqtt_received_count_++;
-  ESP_LOGI(TAG, "MQTT RECEBIDO [%s]: %s", BAL_WRITE_TOPIC, payload.c_str());
+  ESP_LOGI(TAG, "MQTT RECEBIDO [%s]: %s", bal_write_topic_.c_str(), payload.c_str());
   std::string cmd;
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, payload) == DeserializationError::Ok && doc.is<JsonObject>()) {
@@ -863,7 +1020,7 @@ void BalizamentoController::handleBalCommand(const std::string &payload, float e
     timer_start_ms_ = (unsigned long)(esp_timer_get_time() / 1000);
     if (timer_duration_ms_ == 0) { timer_duration_ms_ = 600000; timer_active_ = true; }
     activation_count_++;
-    time_t t = time(nullptr);
+    time_t t = ::time(nullptr);
     struct tm *ti = localtime(&t);
     char buf[25];
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ti);
@@ -871,7 +1028,9 @@ void BalizamentoController::handleBalCommand(const std::string &payload, float e
     publishStatus();
   } else if (cmd == "BalOff") {
     finishActivation(false);
-  } else if (cmd == "UpdateFirmware") {
+    } else if (cmd == "RequestHeartbeat") {
+      publishHeartbeat();
+    } else if (cmd == "UpdateFirmware") {
     const char *url = doc["url"];
     if (url && strlen(url) > 5) {
       ESP_LOGI(TAG, "Iniciando OTA via MQTT: %s", url);
@@ -888,12 +1047,12 @@ void BalizamentoController::publishStatus() {
   StaticJsonDocument<256> doc;
   doc["comando"] = relay_on_ ? "BalOn" : "BalOff";
   doc["estado"] = relay_on_;
-  doc["timestamp"] = fmtTimestamp(time(nullptr));
+  doc["timestamp"] = fmtTimestamp(::time(nullptr));
   std::string out;
   serializeJson(doc, out);
   mqtt_published_count_++;
-  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", BAL_READ_TOPIC, out.c_str());
-  esphome::mqtt::global_mqtt_client->publish(BAL_READ_TOPIC, out);
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", bal_read_topic_.c_str(), out.c_str());
+  esphome::mqtt::global_mqtt_client->publish(bal_read_topic_, out);
 }
 
 void BalizamentoController::publishConsumption(float diff_kwh, unsigned long dur_sec) {
@@ -905,23 +1064,23 @@ void BalizamentoController::publishConsumption(float diff_kwh, unsigned long dur
   doc["consumo_kwh"] = diff_kwh;
   doc["duracao_segundos"] = dur_sec;
   doc["duracao_minutos"] = dur_sec / 60.0;
-  doc["timestamp"] = fmtTimestamp(time(nullptr));
+  doc["timestamp"] = fmtTimestamp(::time(nullptr));
   std::string out;
   serializeJson(doc, out);
   mqtt_published_count_++;
-  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", BAL_READ_TOPIC, out.c_str());
-  esphome::mqtt::global_mqtt_client->publish(BAL_READ_TOPIC, out);
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", bal_read_topic_.c_str(), out.c_str());
+  esphome::mqtt::global_mqtt_client->publish(bal_read_topic_, out);
 }
 
 void BalizamentoController::publishEnergyRegisters() {
   if (!esphome::mqtt::global_mqtt_client) return;
   StaticJsonDocument<2048> doc;
-  doc["topic"] = SDM_READ_TOPIC;
+  doc["topic"] = sdm_read_topic_;
   doc["payload"] = "ReadRegistersEnergy";
   doc["aeroclube_id"] = 1;
-  doc["aeroclube_nome"] = "AeroClub Central";
+  doc["aeroclube_nome"] = saved_config_.mqtt_topic_suffix;
   doc["confirmado"] = true;
-  doc["timestamp"] = fmtTimestamp(time(nullptr));
+  doc["timestamp"] = fmtTimestamp(::time(nullptr));
   JsonObject eq = doc.createNestedObject("equipamento");
   eq["fabricante"] = "Eastron";
   eq["modelo"] = "SDM120";
@@ -951,8 +1110,8 @@ void BalizamentoController::publishEnergyRegisters() {
   std::string out;
   serializeJson(doc, out);
   mqtt_published_count_++;
-  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", SDM_READ_TOPIC, out.c_str());
-  esphome::mqtt::global_mqtt_client->publish(SDM_READ_TOPIC, out);
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", sdm_read_topic_.c_str(), out.c_str());
+  esphome::mqtt::global_mqtt_client->publish(sdm_read_topic_, out);
 }
 
 // ==================== HEARTBEAT TRACKING ====================
@@ -964,9 +1123,22 @@ void BalizamentoController::onWiFiConnected() {
 
 void BalizamentoController::onMqttConnected() {
   last_mqtt_connect_ms_ = (unsigned long)(esp_timer_get_time() / 1000);
-  last_mqtt_connect_time_ = time(nullptr);
+  last_mqtt_connect_time_ = ::time(nullptr);
   mqtt_was_connected_ = true;
   ESP_LOGI(TAG, "MQTT reconectado");
+  // Subscrever topicos com sufixo configurado
+  if (esphome::mqtt::global_mqtt_client) {
+    esphome::mqtt::global_mqtt_client->subscribe(
+        bal_write_topic_, [this](const std::string &topic, const std::string &payload) {
+          float energia_atual = current_energy_;
+          handleBalCommand(payload, energia_atual);
+        }, 0);
+    esphome::mqtt::global_mqtt_client->subscribe(
+        sdm_write_topic_, [this](const std::string &topic, const std::string &payload) {
+          ::sdm120_on_message(payload);
+        }, 0);
+    ESP_LOGI(TAG, "Inscrito em: %s / %s", bal_write_topic_.c_str(), sdm_write_topic_.c_str());
+  }
   publishHeartbeat();
 }
 
@@ -1127,7 +1299,7 @@ void BalizamentoController::publishHeartbeat() {
   }
   sistema["flash_livre"] = flash_free;
 
-  time_t now = time(nullptr);
+  time_t now = ::time(nullptr);
   struct tm *ti = localtime(&now);
   char ts_buf[25];
   strftime(ts_buf, sizeof(ts_buf), "%Y-%m-%dT%H:%M:%S", ti);
@@ -1136,8 +1308,8 @@ void BalizamentoController::publishHeartbeat() {
   std::string out;
   serializeJson(doc, out);
   mqtt_published_count_++;
-  ESP_LOGI(TAG, "MQTT ENVIO [%s]", HEARTBEAT_TOPIC);
-  esphome::mqtt::global_mqtt_client->publish(HEARTBEAT_TOPIC, out);
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]", heartbeat_topic_.c_str());
+  esphome::mqtt::global_mqtt_client->publish(heartbeat_topic_, out);
 }
 
 // ==================== HISTORICO ====================
@@ -1176,7 +1348,7 @@ void BalizamentoController::saveHistory() {
 
 void BalizamentoController::addHistory(uint32_t dur, float energy, bool completed, bool has_energy) {
   HistoryEntry e;
-  e.timestamp = (uint32_t)time(nullptr);
+  e.timestamp = (uint32_t)::time(nullptr);
   e.duration_sec = dur;
   e.energy_kwh = energy;
   e.completed = completed;
@@ -1310,6 +1482,10 @@ void BalizamentoController::loadSavedConfig() {
   nvs_get_str(nvs_handle_, "mqtt_user", cfg.mqtt_username, &sz);
   sz = sizeof(cfg.mqtt_password);
   nvs_get_str(nvs_handle_, "mqtt_pass", cfg.mqtt_password, &sz);
+  sz = sizeof(cfg.mqtt_topic_suffix);
+  nvs_get_str(nvs_handle_, "topic_suf", cfg.mqtt_topic_suffix, &sz);
+  sz = sizeof(cfg.timezone);
+  nvs_get_str(nvs_handle_, "timezone", cfg.timezone, &sz);
 
   nvs_close(nvs_handle_);
   saved_config_ = cfg;
@@ -1326,11 +1502,14 @@ void BalizamentoController::saveConfig(const SavedConfig &cfg) {
   nvs_set_u16(nvs_handle_, "mqtt_port", cfg.mqtt_port);
   nvs_set_str(nvs_handle_, "mqtt_user", cfg.mqtt_username);
   nvs_set_str(nvs_handle_, "mqtt_pass", cfg.mqtt_password);
+  nvs_set_str(nvs_handle_, "topic_suf", cfg.mqtt_topic_suffix);
+  nvs_set_str(nvs_handle_, "timezone", cfg.timezone);
   nvs_commit(nvs_handle_);
   nvs_close(nvs_handle_);
 
   saved_config_ = cfg;
-  ESP_LOGI(TAG, "Config salva - WiFi: %s, MQTT: %s:%d", cfg.wifi_ssid, cfg.mqtt_broker, cfg.mqtt_port);
+  buildTopics();
+  ESP_LOGI(TAG, "Config salva - WiFi: %s, MQTT: %s:%d, Sufixo: %s", cfg.wifi_ssid, cfg.mqtt_broker, cfg.mqtt_port, cfg.mqtt_topic_suffix);
 }
 
 void BalizamentoController::reconnectWiFi() {
@@ -1346,25 +1525,10 @@ void BalizamentoController::reconnectWiFi() {
   esp_wifi_connect();
 }
 
-void BalizamentoController::ensureAP() {
-  wifi_mode_t mode;
-  esp_wifi_get_mode(&mode);
-  if (mode == WIFI_MODE_APSTA || mode == WIFI_MODE_AP) {
-    ap_started_ = true;
-    return;
-  }
-
-  ESP_LOGI(TAG, "Iniciando AP manualmente");
-  wifi_config_t ap_cfg = {};
-  strcpy((char*)ap_cfg.ap.ssid, "AeroControl");
-  strcpy((char*)ap_cfg.ap.password, "123456789");
-  ap_cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
-  ap_cfg.ap.max_connection = 4;
-
-  esp_wifi_set_mode(WIFI_MODE_APSTA);
-  esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+void BalizamentoController::startAP() {
+  // AP gerenciado pelo ESPHome via YAML (ap_timeout: 0s)
   ap_started_ = true;
-  ESP_LOGI(TAG, "AP AeroControl iniciado");
+  ESP_LOGI(TAG, "AP AeroControl ativo (gerenciado pelo ESPHome)");
 }
 
 // ==================== CALLBACKS DO YAML ====================
@@ -1375,7 +1539,7 @@ void balizamento_on_message(const std::string &payload, float energia) {
 void sdm120_on_message(const std::string &payload) {
   if (!g_controller) return;
   g_controller->incrementMqttReceivedCount();
-  ESP_LOGI(TAG, "MQTT RECEBIDO [%s]: %s", SDM_WRITE_TOPIC, payload.c_str());
+  ESP_LOGI(TAG, "MQTT RECEBIDO [%s]: %s", g_controller->getSdmWriteTopic().c_str(), payload.c_str());
   StaticJsonDocument<256> doc;
   if (deserializeJson(doc, payload) == DeserializationError::Ok) {
     const char *cmd = doc["comando"];

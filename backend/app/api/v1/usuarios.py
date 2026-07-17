@@ -83,8 +83,10 @@ async def atualizar_usuario(
     usuario_id: int,
     data: UsuarioUpdate,
     session: AsyncSession = Depends(get_session),
-    current_user: Usuario = Depends(verificar_admin_ou_proprietario),
+    current_user: Usuario = Depends(get_current_user),
 ):
+    if current_user.nivel_acesso == NivelAcesso.SOLICITANTE and current_user.id != usuario_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso restrito")
     service = UsuarioService(session)
     usuario = await service.obter_por_id(usuario_id)
     if not usuario:

@@ -2,6 +2,8 @@ import { ReactNode, useState } from 'react'
 import { useRouter } from 'next/router'
 import { useAuth } from '@/contexts/AuthContext'
 import Link from 'next/link'
+import { UsuariosAPI } from '@/services/api'
+import toast from 'react-hot-toast'
 import {
   LayoutDashboard, Calendar, Plane, Users, Settings, BarChart3,
   Monitor, LogOut, Menu, X, DollarSign, FileText, Wifi, Building2, TrendingUp, Radio, Zap
@@ -22,7 +24,7 @@ const solicitanteNav = [
 
 export default function Layout({ children, title }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, updateUser } = useAuth()
   const router = useRouter()
 
   const adminNav = [
@@ -82,7 +84,22 @@ export default function Layout({ children, title }: LayoutProps) {
           <div className="flex items-center justify-between">
             <div className="text-sm">
               <p className="font-medium text-gray-200">{user?.nome}</p>
-              <p className="text-gray-500 text-xs capitalize">{user?.nivel_acesso}</p>
+              <select
+                value={user?.nivel_acesso || ''}
+                onChange={async (e) => {
+                  const novo = e.target.value
+                  try {
+                    await UsuariosAPI.atualizar(user!.usuario_id, { nivel_acesso: novo })
+                    updateUser({ nivel_acesso: novo })
+                    toast.success(`Tipo alterado para ${novo}`)
+                  } catch { toast.error('Erro ao alterar tipo') }
+                }}
+                className="text-xs bg-dark-800 border border-dark-600 rounded px-1 py-0.5 text-gray-300 capitalize cursor-pointer focus:outline-none focus:border-neon-500"
+              >
+                <option value="proprietario">Proprietário</option>
+                <option value="administrador">Administrador</option>
+                <option value="solicitante">Solicitante</option>
+              </select>
             </div>
             <button onClick={handleLogout} className="p-2 text-gray-500 hover:text-neon-400 transition">
               <LogOut className="w-5 h-5" />

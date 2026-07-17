@@ -76,6 +76,7 @@ export default function AdminDashboard() {
     { label: 'Agendamentos Hoje', value: dashboard?.agendamentos_dia ?? '...', icon: Calendar, color: 'bg-neon-500/10 text-neon-400' },
     { label: 'Agendamentos Futuros', value: dashboard?.agendamentos_futuros ?? '...', icon: Clock, color: 'bg-green-500/10 text-green-400' },
     { label: 'Concluídos', value: dashboard?.agendamentos_concluidos ?? '...', icon: Activity, color: 'bg-purple-500/10 text-purple-400' },
+    { label: 'Usuários Ativos', value: dashboard?.usuarios_ativos ?? '...', icon: Users, color: 'bg-blue-500/10 text-blue-400' },
     { label: 'Horas de Utilização', value: `${dashboard?.horas_utilizacao ?? '...'}h`, icon: Plane, color: 'bg-orange-500/10 text-orange-400' },
     { label: 'Receita (mês)', value: `R$ ${dashboard?.receita?.toFixed(2) ?? '...'}`, icon: DollarSign, color: 'bg-green-500/10 text-green-400' },
     { label: 'Consumo (mês)', value: `${dashboard?.consumo_energia ?? '...'} kWh`, icon: Zap, color: 'bg-yellow-500/10 text-yellow-400' },
@@ -284,9 +285,9 @@ export default function AdminDashboard() {
               <Users className="w-6 h-6 mx-auto text-green-400" />
               <span className="text-sm mt-1 block text-gray-300">Usuários</span>
             </a>
-            <a href="/admin/mqtt-config" className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg text-center hover:bg-blue-500/10 transition">
-              <Wifi className="w-6 h-6 mx-auto text-blue-400" />
-              <span className="text-sm mt-1 block text-gray-300">MQTT Config</span>
+            <a href="/admin/financeiro" className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg text-center hover:bg-blue-500/10 transition">
+              <DollarSign className="w-6 h-6 mx-auto text-blue-400" />
+              <span className="text-sm mt-1 block text-gray-300">Financeiro</span>
             </a>
             <a href="/admin/monitoramento" className="p-4 bg-purple-500/5 border border-purple-500/20 rounded-lg text-center hover:bg-purple-500/10 transition">
               <Activity className="w-6 h-6 mx-auto text-purple-400" />

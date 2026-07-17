@@ -53,16 +53,13 @@ async def dashboard_admin(
     if current_user.nivel_acesso not in (NivelAcesso.PROPRIETARIO, NivelAcesso.ADMINISTRADOR):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso restrito")
 
-    from sqlalchemy import cast, Date
-    today = func.current_date()
-
     def _apply_ac_filter(query):
         if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and current_user.aeroclube_id:
             return query.join(Usuario, Usuario.id == Agendamento.usuario_id).where(Usuario.aeroclube_id == current_user.aeroclube_id)
         return query
 
     agendamentos_dia = await session.execute(
-        _apply_ac_filter(select(func.count(Agendamento.id)).where(cast(Agendamento.data, Date) == today))
+        _apply_ac_filter(select(func.count(Agendamento.id)).where(func.date(Agendamento.data) == func.current_date()))
     )
     agendamentos_futuros = await session.execute(
         _apply_ac_filter(select(func.count(Agendamento.id)).where(
@@ -70,22 +67,39 @@ async def dashboard_admin(
             Agendamento.hora_inicio > func.now(),
         ))
     )
-    agendamentos_concluidos = await session.execute(
-        _apply_ac_filter(select(func.count(Agendamento.id)).where(Agendamento.status == StatusAgendamento.CONCLUIDO))
-    )
-
-    financeiro = FinanceiroService(session)
-    from datetime import datetime, timedelta
+    from datetime import datetime
     inicio_mes = datetime.now().replace(day=1).date()
     fim_mes = datetime.now().date()
-    aeroclube_nome = current_user.aeroclube if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR else None
+
+    agendamentos_concluidos = await session.execute(
+        _apply_ac_filter(select(func.count(Agendamento.id)).where(
+            Agendamento.status == StatusAgendamento.CONCLUIDO,
+            func.date(Agendamento.data) >= inicio_mes,
+            func.date(Agendamento.data) <= fim_mes,
+        ))
+    )
+
+    aeroclube_id = current_user.aeroclube_id if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR else None
+    if aeroclube_id:
+        total_usuarios = await session.execute(
+            select(func.count(Usuario.id)).where(
+                Usuario.aeroclube_id == aeroclube_id,
+                Usuario.ativo == True,
+            )
+        )
+        usuarios_ativos = total_usuarios.scalar() or 0
+    else:
+        usuarios_ativos = 0
+
+    financeiro = FinanceiroService(session)
+    aeroclube_nome = current_user.aeroclube if aeroclube_id else None
     resumo = await financeiro.resumo_periodo(inicio_mes, fim_mes, aeroclube=aeroclube_nome)
 
     return DashboardAdmin(
         agendamentos_dia=agendamentos_dia.scalar() or 0,
         agendamentos_futuros=agendamentos_futuros.scalar() or 0,
         agendamentos_concluidos=agendamentos_concluidos.scalar() or 0,
-        usuarios_ativos=0,
+        usuarios_ativos=usuarios_ativos,
         horas_utilizacao=resumo["total_horas"],
         consumo_energia=resumo["total_energia_kwh"],
         receita=resumo["total_gasto"],

@@ -6,12 +6,28 @@ import toast from 'react-hot-toast'
 const PRICING_KEYS = [
   'valor_acionamento',
   'valor_kwh',
+  'valor_pago_kwh',
+  'valor_cobrado_kwh',
+  'taxa_fixa_solicitacao',
   'potencia_instalada_kw',
   'tempo_minimo_cobranca_min',
   'tempo_adicional_min',
   'impostos_percentual',
   'taxas_extras',
 ]
+
+const DISPLAY_NAMES: Record<string, string> = {
+  valor_acionamento: 'Valor por Acionamento',
+  valor_kwh: 'Valor do kWh',
+  valor_pago_kwh: 'Valor Pago pelo kWh',
+  valor_cobrado_kwh: 'Valor Cobrado pelo kWh',
+  taxa_fixa_solicitacao: 'Taxa Fixa de Solicitação',
+  potencia_instalada_kw: 'Potência Instalada',
+  tempo_minimo_cobranca_min: 'Tempo Mínimo de Cobrança',
+  tempo_adicional_min: 'Tempo Adicional',
+  impostos_percentual: 'Impostos',
+  taxas_extras: 'Taxas Extras',
+}
 
 export default function AdminConfiguracoes() {
   const [configs, setConfigs] = useState<any[]>([])
@@ -34,8 +50,8 @@ export default function AdminConfiguracoes() {
           {configs.map((c: any) => (
             <div key={c.chave} className="flex items-center justify-between py-4 border-b border-dark-700 last:border-0">
               <div>
-                <p className="font-medium text-gray-200">{c.chave}</p>
-                <p className="text-sm text-gray-500">{c.descricao}</p>
+                <p className="font-medium text-gray-200">{DISPLAY_NAMES[c.chave] || c.chave}</p>
+                {c.descricao && <p className="text-sm text-gray-500">{c.descricao}</p>}
               </div>
               <div className="flex items-center gap-2">
                 {c.tipo === 'booleano' ? (

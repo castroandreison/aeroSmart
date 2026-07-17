@@ -14,6 +14,7 @@ interface AuthContextType {
   loading: boolean
   login: (email: string, senha: string) => Promise<void>
   logout: () => void
+  updateUser: (data: Partial<User>) => void
   isAdmin: boolean
 }
 
@@ -59,10 +60,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  const updateUser = (data: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return null
+      const updated = { ...prev, ...data }
+      localStorage.setItem('user', JSON.stringify(updated))
+      return updated
+    })
+  }
+
   const isAdmin = user?.nivel_acesso === 'administrador' || user?.nivel_acesso === 'proprietario'
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, isAdmin }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, updateUser, isAdmin }}>
       {children}
     </AuthContext.Provider>
   )

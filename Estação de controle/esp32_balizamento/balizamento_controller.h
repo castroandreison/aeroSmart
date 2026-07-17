@@ -189,15 +189,6 @@ th{color:#8892a4;font-size:11px;text-transform:uppercase}
 </table>
 </div>
 <div class="card">
-<h2>MQTT Log</h2>
-<div style="max-height:300px;overflow-y:auto;font-size:11px">
-<table>
-<thead><tr><th>Topico</th><th>Payload</th><th>Quando</th></tr></thead>
-<tbody id="mqttLogBody"><tr><td colspan="3" style="text-align:center;color:#5a6a7e">Aguardando...</td></tr></tbody>
-</table>
-</div>
-</div>
-<div class="card">
 <h2>Configuracoes</h2>
 <div style="display:flex;gap:4px;margin-bottom:12px">
 <button class="btn-primary" style="flex:1;font-size:13px;padding:6px" onclick="showTab('rede')">Rede</button>

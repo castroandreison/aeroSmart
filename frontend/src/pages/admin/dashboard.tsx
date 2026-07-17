@@ -70,6 +70,7 @@ export default function AdminDashboard() {
   }, [])
 
   const hbEntries = Object.entries(heartbeats)
+  const isOnline = hbEntries.some(([_, hb]) => hb.timestamp && (Date.now() - new Date(hb.timestamp).getTime()) < 8 * 60 * 1000)
 
   const cards = [
     { label: 'Agendamentos Hoje', value: dashboard?.agendamentos_dia ?? '...', icon: Calendar, color: 'bg-neon-500/10 text-neon-400' },
@@ -107,14 +108,14 @@ export default function AdminDashboard() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className={`w-4 h-4 rounded-full ${pista?.status === 'ligado' ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse' : pista?.status === 'ligando' ? 'bg-yellow-500 shadow-lg shadow-yellow-500/50 animate-pulse' : 'bg-gray-600'}`} />
-                <span className="font-medium text-gray-200 capitalize">{pista?.status || 'Desconhecido'}</span>
+                <div className={`w-4 h-4 rounded-full ${isOnline ? 'bg-green-500 shadow-lg shadow-green-500/50' : 'bg-red-500'}`} />
+                <span className={`font-medium ${isOnline ? 'text-green-400' : 'text-red-400'}`}>{isOnline ? 'Online' : 'Offline'}</span>
               </div>
               <div className="flex items-center gap-2">
                 {mqttConnected === true ? (
-                  <span className="flex items-center gap-1 text-green-400 text-sm"><Wifi className="w-4 h-4" /> MQTT</span>
+                  <span className="flex items-center gap-1 text-green-400 text-sm"><Wifi className="w-4 h-4" /> Comunicação</span>
                 ) : mqttConnected === false ? (
-                  <span className="flex items-center gap-1 text-red-400 text-sm"><WifiOff className="w-4 h-4" /> MQTT</span>
+                  <span className="flex items-center gap-1 text-red-400 text-sm"><WifiOff className="w-4 h-4" /> Comunicação</span>
                 ) : null}
               </div>
             </div>
@@ -179,9 +180,9 @@ export default function AdminDashboard() {
                   </div>
                   <div className="flex items-center gap-2">
                     {hb.mqtt?.status === 'Conectado' ? (
-                      <span className="flex items-center gap-1 text-green-400"><Wifi className="w-4 h-4" /> MQTT OK</span>
+                      <span className="flex items-center gap-1 text-green-400"><Wifi className="w-4 h-4" /> Comunicação OK</span>
                     ) : (
-                      <span className="flex items-center gap-1 text-red-400"><WifiOff className="w-4 h-4" /> MQTT</span>
+                      <span className="flex items-center gap-1 text-red-400"><WifiOff className="w-4 h-4" /> Comunicação</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import Layout from '@/components/Layout'
-import { AgendamentosAPI, AeronavesAPI } from '@/services/api'
+import { AgendamentosAPI, AeronavesAPI, AeroclubesAPI } from '@/services/api'
 import toast from 'react-hot-toast'
 
 function hojeStr() {
@@ -10,13 +10,15 @@ function hojeStr() {
 export default function AdminAgendamentos() {
   const [agendamentos, setAgendamentos] = useState<any[]>([])
   const [aeronaves, setAeronaves] = useState<any[]>([])
+  const [aeroclubes, setAeroclubes] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
-  const [form, setForm] = useState({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, observacoes: '' })
+  const [form, setForm] = useState({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
 
   const load = useCallback(() => {
     AgendamentosAPI.listar(true).then(setAgendamentos).catch(() => {})
     AeronavesAPI.listar().then(setAeronaves).catch(() => {})
+    AeroclubesAPI.listar().then(setAeroclubes).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -33,7 +35,7 @@ export default function AdminAgendamentos() {
 
   const openCreate = () => {
     setEditId(null)
-    setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, observacoes: '' })
+    setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
     setShowForm(true)
   }
 
@@ -43,7 +45,7 @@ export default function AdminAgendamentos() {
     const inicioStr = typeof a.hora_inicio === 'string' ? a.hora_inicio.slice(11, 16) : new Date(a.hora_inicio).toTimeString().slice(0, 5)
     const terminoStr = typeof a.hora_termino === 'string' ? a.hora_termino.slice(11, 16) : new Date(a.hora_termino).toTimeString().slice(0, 5)
     setEditId(a.id)
-    setForm({ data_dia: dia, data_mes: mes, hora_inicio: inicioStr, hora_termino: terminoStr, aeronave_id: a.aeronave_id, observacoes: a.observacoes || '' })
+    setForm({ data_dia: dia, data_mes: mes, hora_inicio: inicioStr, hora_termino: terminoStr, aeronave_id: a.aeronave_id, aeroclube_id: a.aeroclube_id || 0, observacoes: a.observacoes || '' })
     setShowForm(true)
   }
 
@@ -53,9 +55,13 @@ export default function AdminAgendamentos() {
       toast.error('Selecione uma aeronave')
       return
     }
+    if (!form.aeroclube_id || form.aeroclube_id === 0) {
+      toast.error('Selecione um aeroclube')
+      return
+    }
     const ano = new Date().getFullYear()
     const data = `${ano}-${String(form.data_mes).padStart(2, '0')}-${String(form.data_dia).padStart(2, '0')}`
-    const payload = { data, hora_inicio: form.hora_inicio, hora_termino: form.hora_termino, aeronave_id: form.aeronave_id, observacoes: form.observacoes }
+    const payload = { data, hora_inicio: form.hora_inicio, hora_termino: form.hora_termino, aeronave_id: form.aeronave_id, aeroclube_id: form.aeroclube_id, observacoes: form.observacoes }
     try {
       if (editId) {
         await AgendamentosAPI.atualizar(editId, payload)
@@ -66,7 +72,7 @@ export default function AdminAgendamentos() {
       }
       setShowForm(false)
       setEditId(null)
-      setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, observacoes: '' })
+      setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
       load()
     } catch (err: any) { toast.error(err.response?.data?.detail || 'Erro ao salvar') }
   }
@@ -127,6 +133,16 @@ export default function AdminAgendamentos() {
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-400 mb-1">Aeroclube</label>
+              <select value={form.aeroclube_id} onChange={(e) => setForm({ ...form, aeroclube_id: Number(e.target.value) })}
+                className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required>
+                <option value={0} className="bg-dark-800">Selecione</option>
+                {aeroclubes.map((a: any) => (
+                  <option key={a.id} value={a.id} className="bg-dark-800">{a.nome}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-400 mb-1">Início</label>
               <input type="time" value={form.hora_inicio} onChange={(e) => setForm({ ...form, hora_inicio: e.target.value })}
                 className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required />
@@ -142,7 +158,7 @@ export default function AdminAgendamentos() {
                 className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" rows={2} />
             </div>
           </div>
-          <button type="submit" disabled={!form.aeronave_id || form.aeronave_id === 0}
+          <button type="submit" disabled={!form.aeronave_id || form.aeronave_id === 0 || !form.aeroclube_id || form.aeroclube_id === 0}
             className="mt-4 px-6 py-2 bg-neon-600 hover:bg-neon-500 disabled:bg-dark-600 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-neon-600/20">
             {editId ? 'Atualizar' : 'Salvar'}
           </button>
@@ -157,6 +173,7 @@ export default function AdminAgendamentos() {
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Término</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Duração</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Solicitante</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Aeroclube</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Aeronave</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Status</th>
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-400">Ações</th>
@@ -175,6 +192,7 @@ export default function AdminAgendamentos() {
                   {a.tempo_balizamento_minutos != null ? `${a.tempo_balizamento_minutos} min` : '-'}
                 </td>
                 <td className="px-4 py-3 text-gray-300">{a.solicitante_nome}</td>
+                <td className="px-4 py-3 text-gray-300">{a.aeroclube_nome || '-'}</td>
                 <td className="px-4 py-3 text-gray-300">{a.aeronave_matricula}</td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${

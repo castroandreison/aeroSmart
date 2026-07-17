@@ -15,3 +15,4 @@ class Aeroclube(Base):
     created_at = Column(DateTime(), server_default=func.now())
 
     usuarios = relationship("Usuario", back_populates="aeroclube_rel")
+    agendamentos = relationship("Agendamento", back_populates="aeroclube_rel")

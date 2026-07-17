@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Documentação Técnica — Balizamento Pista (ESP32)</title>
+<style>
+body{font-family:system-ui,sans-serif;line-height:1.6;max-width:960px;margin:0 auto;padding:20px;background:#f5f7fa;color:#1a1a2e}
+h1{border-bottom:3px solid #e94560;padding-bottom:10px}
+h2{color:#0f3460;margin-top:40px;border-bottom:1px solid #ccc;padding-bottom:6px}
+h3{color:#16213e;margin-top:28px}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+th{background:#0f3460;color:#fff;padding:10px 12px;text-align:left;font-size:13px}
+td{padding:8px 12px;border-bottom:1px solid #eef;font-size:13px;vertical-align:top}
+tr:nth-child(even){background:#f8f9fd}
+pre{background:#1a1a2e;color:#e4e4e4;padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13px;line-height:1.5}
+code{background:#eef;padding:2px 6px;border-radius:4px;font-size:13px}
+pre code{background:transparent;padding:0}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin:1px}
+.tag-green{background:#d4edda;color:#155724}
+.tag-blue{background:#cce5ff;color:#004085}
+.tag-red{background:#f8d7da;color:#721c24}
+.tag-amber{background:#fff3cd;color:#856404}
+.card{background:#fff;border-radius:8px;padding:16px;margin:12px 0;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.flex{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<h1>Documentação Técnica — Firmware Balizamento Pista</h1>
+
+<div class="card flex">
+<div><span class="tag tag-blue">ESP32</span> <span class="tag tag-green">ESPHome + Arduino</span> <span class="tag tag-amber">v2.0.5</span></div>
+</div>
+
+<!-- ========== 1 ========== -->
+<h2>1. Identificação</h2>
+<table>
+<tr><td><strong>Nome do dispositivo</strong></td><td><code>balizamento-pista</code></td></tr>
+<tr><td><strong>Nome amigável</strong></td><td>Balizamento Pista</td></tr>
+<tr><td><strong>Plataforma</strong></td><td>ESP32 (ESP32Dev) via ESPHome + Arduino Framework</td></tr>
+<tr><td><strong>Linguagem</strong></td><td>C++ (ESPHome lambda + Arduino)</td></tr>
+</table>
+
+<!-- ========== 2 ========== -->
+<h2>2. Pinagem do ESP32</h2>
+<table>
+<thead><tr><th>GPIO</th><th>Nome</th><th>Direção</th><th>Pull</th><th>Descrição</th></tr></thead>
+<tbody>
+<tr><td>2</td><td><code>RELAY_PIN</code></td><td>Output</td><td>—</td><td>Aciona o relé da pista. Inicializado LOW (desligado).</td></tr>
+<tr><td>4</td><td><code>MANUAL_PIN</code></td><td>Input</td><td><code>GPIO_PULLDOWN_ONLY</code></td><td>Chave manual. HIGH = modo manual ativo.</td></tr>
+<tr><td>16</td><td><code>FLOW_CONTROL_PIN</code></td><td>Output</td><td>—</td><td>Controle de fluxo RS485 (DE/RE).</td></tr>
+<tr><td>17</td><td><code>UART_TX</code></td><td>Output</td><td>—</td><td>TX da RS485 para o medidor SDM120.</td></tr>
+<tr><td>18</td><td><code>UART_RX</code></td><td>Input</td><td>—</td><td>RX da RS485 para o medidor SDM120.</td></tr>
+</tbody>
+</table>
+
+<!-- ========== 3 ========== -->
+<h2>3. Conexões Externas</h2>
+<table>
+<thead><tr><th>Equipamento</th><th>Interface</th><th>Protocolo</th><th>Baudrate</th></tr></thead>
+<tbody>
+<tr><td>Medidor Eastron SDM120</td><td>RS485 (GPIO 17/18)</td><td>Modbus RTU</td><td>9600 8N1</td></tr>
+<tr><td>Relé de potência</td><td>GPIO 2</td><td>Digital (HIGH = liga)</td><td>—</td></tr>
+<tr><td>Chave manual</td><td>GPIO 4</td><td>Digital (pulldown)</td><td>—</td></tr>
+</tbody>
+</table>
+
+<h3>Registradores Modbus — SDM120 (endereço 1)</h3>
+<table>
+<thead><tr><th>Registrador</th><th>Tipo</th><th>Descrição</th><th>Unidade</th></tr></thead>
+<tbody>
+<tr><td>0x0000</td><td>FP32</td><td>Tensão</td><td>V</td></tr>
+<tr><td>0x0006</td><td>FP32</td><td>Corrente</td><td>A</td></tr>
+<tr><td>0x000C</td><td>FP32</td><td>Potência Ativa</td><td>W</td></tr>
+<tr><td>0x0012</td><td>FP32</td><td>Potência Aparente</td><td>VA</td></tr>
+<tr><td>0x0018</td><td>FP32</td><td>Potência Reativa</td><td>VAr</td></tr>
+<tr><td>0x001E</td><td>FP32</td><td>Frequência</td><td>Hz</td></tr>
+<tr><td>0x0028</td><td>FP32</td><td>Fator de Potência</td><td>—</td></tr>
+<tr><td>0x0046</td><td>FP32</td><td>Energia Importada</td><td>kWh</td></tr>
+</tbody>
+</table>
+
+<!-- ========== 4 ========== -->
+<h2>4. Tópicos MQTT</h2>
+<p>O sufixo <code>{estacao}</code> é definido na configuração (padrão: <code>AeroClub Central</code>).</p>
+
+<table>
+<thead><tr><th>Tópico</th><th>Direção</th><th>Finalidade</th></tr></thead>
+<tbody>
+<tr><td><code>Bal/Write/{estacao}</code></td><td><span class="tag tag-amber">Platforma → ESP32</span></td><td>Comandos do balizador</td></tr>
+<tr><td><code>Bal/Read/{estacao}</code></td><td><span class="tag tag-green">ESP32 → Plataforma</span></td><td>Status, consumo e confirmações</td></tr>
+<tr><td><code>SDM120/Write/{estacao}</code></td><td><span class="tag tag-amber">Platforma → ESP32</span></td><td>Comandos do medidor</td></tr>
+<tr><td><code>SDM120/Read/{estacao}</code></td><td><span class="tag tag-green">ESP32 → Plataforma</span></td><td>Leituras dos registradores</td></tr>
+<tr><td><code>Heartbeat/{estacao}</code></td><td><span class="tag tag-green">ESP32 → Plataforma</span></td><td>Heartbeat periódico</td></tr>
+</tbody>
+</table>
+
+<h3>4.1 Comandos recebidos — <code>Bal/Write/{estacao}</code></h3>
+
+<h4>BalOn</h4>
+<p>Liga o relé da pista.</p>
+<pre><code>{"comando": "BalOn"}</code></pre>
+<p>Com parâmetros do agendamento:</p>
+<pre><code>{
+  "comando": "BalOn",
+  "agendamento": {
+    "id": 1, "data": "2026-07-17",
+    "horario": "10:00", "hora_termino": "10:30",
+    "duracao_minutos": 30
+  }
+}</code></pre>
+<p><strong>Resposta:</strong> <code>publishStatus()</code> → <code>{"comando":"BalOn","estado":true,"timestamp":"..."}</code></p>
+
+<h4>BalOff</h4>
+<p>Desliga o relé da pista.</p>
+<pre><code>{"comando": "BalOff"}</code></pre>
+<p><strong>Resposta:</strong> <code>publishConsumption()</code> + <code>publishStatus(BalOff:false)</code></p>
+
+<h4>AgendarBalizamento</h4>
+<p>Agenda uma ativação futura. Armazenado em NVS e executado automaticamente.</p>
+<pre><code>{
+  "comando": "AgendarBalizamento",
+  "agendamento": {
+    "id": 77,
+    "data": "17/07/2026",
+    "hora_inicio": "10:00:00",
+    "hora_fim": "10:30:00",
+    "duracao_segundos": 1800
+  }
+}</code></pre>
+<p><strong>Validações:</strong> <code>id &gt; 0</code>, <code>hora_fim &gt; hora_inicio</code>, <code>end_ts &gt; now</code></p>
+<p><strong>Resposta:</strong> <code>publishScheduleStatus(id, "AgendamentoConfirmado", "agendado")</code></p>
+
+<h4>CancelarAgendamento</h4>
+<pre><code>{"comando": "CancelarAgendamento", "agendamento": {"id": 77}}</code></pre>
+
+<h4>RequestHeartbeat</h4>
+<pre><code>{"comando": "RequestHeartbeat"}</code></pre>
+<p><strong>Resposta:</strong> <code>publishHeartbeat()</code> em <code>Heartbeat/{estacao}</code></p>
+
+<h4>UpdateFirmware</h4>
+<pre><code>{"comando": "UpdateFirmware", "url": "https://exemplo.com/firmware.bin"}</code></pre>
+
+<h3>4.2 Comandos recebidos — <code>SDM120/Write/{estacao}</code></h3>
+
+<h4>ReadRegistersEnergy</h4>
+<pre><code>{"comando": "ReadRegistersEnergy"}</code></pre>
+<p><strong>Resposta:</strong> <code>publishEnergyRegisters()</code></p>
+
+<h3>4.3 Mensagens publicadas — <code>Bal/Read/{estacao}</code></h3>
+
+<h4>BalOn / BalOff</h4>
+<pre><code>{"comando": "BalOn", "estado": true, "timestamp": "17/07/2026 10:00:00"}</code></pre>
+
+<h4>ConsumoBalizamento</h4>
+<pre><code>{
+  "comando": "ConsumoBalizamento",
+  "energia_inicial_kwh": 150.2,
+  "energia_final_kwh": 150.8,
+  "consumo_kwh": 0.6,
+  "duracao_segundos": 1800,
+  "duracao_minutos": 30.0,
+  "timestamp": "17/07/2026 10:30:00"
+}</code></pre>
+
+<h4>AgendamentoConfirmado / AgendamentoAndamento / AgendamentoFinalizado</h4>
+<pre><code>{
+  "comando": "AgendamentoConfirmado",
+  "agendamento": {
+    "id": 77,
+    "status": "agendado",
+    "data_hora": "17/07/2026 09:00:00"
+  }
+}</code></pre>
+
+<h3>4.4 Mensagens publicadas — <code>Heartbeat/{estacao}</code></h3>
+<p>Publicado a cada 300s e sob demanda via RequestHeartbeat.</p>
+<pre><code>{
+  "device": {
+    "nome": "Balizamento Pista", "modelo": "ESP32",
+    "mac": "AA:BB:CC:DD:EE:FF", "ip": "192.168.1.100"
+  },
+  "firmware": { "versao": "2.0.5" },
+  "wifi": { "ssid": "MeuWiFi", "rssi": -45, "qualidade": 85 },
+  "mqtt": { "broker": "192.168.1.10", "status": "Conectado" },
+  "balizamento": {
+    "status": "Inativo", "gpio": 2,
+    "ultimo_comando": "BalOff",
+    "modo_manual": false
+  },
+  "sistema": { "uptime_segundos": 86400, "heap_livre": 102400 },
+  "timestamp": "2026-07-17T09:00:00"
+}</code></pre>
+
+<h3>4.5 Mensagens publicadas — <code>SDM120/Read/{estacao}</code></h3>
+<pre><code>{
+  "topic": "SDM120/Read/AeroClub Central",
+  "payload": "ReadRegistersEnergy",
+  "aeroclube_id": 1,
+  "aeroclube_nome": "AeroClub Central",
+  "confirmado": true,
+  "equipamento": {
+    "fabricante": "Eastron", "modelo": "SDM120",
+    "numero_serie": "AA:BB:CC:DD:EE:FF"
+  },
+  "registradores": {
+    "0000": {"descricao": "Tensao", "valor": 220.5, "unidade": "V"},
+    "0006": {"descricao": "Corrente", "valor": 2.3, "unidade": "A"},
+    "000C": {"descricao": "Potencia Ativa", "valor": 480.0, "unidade": "W"},
+    "0046": {"descricao": "Energia Importada", "valor": 150.2, "unidade": "kWh"}
+  }
+}</code></pre>
+
+<h3>4.6 Fluxo de agendamento</h3>
+<pre>Plataforma                     ESP32                      SDM120
+    |                            |                           |
+    |--- Bal/Write ------------->|                           |
+    |   AgendarBalizamento       |                           |
+    |<-- Bal/Read --------------|                           |
+    |   AgendamentoConfirmado    |                           |
+    |       ...                  |                           |
+    |                            |<--- Modbus -------------|
+    |                            |     (leituras cíclicas)  |
+    |                            | Liga relé (GPIO 2)       |
+    |<-- Bal/Read --------------|                           |
+    |   AgendamentoAndamento     |                           |
+    |       ...                  |                           |
+    |                            | Desliga relé (GPIO 2)    |
+    |<-- Bal/Read --------------|                           |
+    |   ConsumoBalizamento       |                           |
+    |<-- Bal/Read --------------|                           |
+    |   AgendamentoFinalizado    |                           |</pre>
+
+<!-- ========== 5 ========== -->
+<h2>5. API HTTP (WebServer — porta 80)</h2>
+
+<h3>5.1 Página principal</h3>
+<table><tr><td><code>GET /</code></td><td>HTML completo com CSS e JS embarcados.</td></tr></table>
+
+<h3>5.2 Endpoints REST</h3>
+
+<h4><code>GET /api/status</code></h4>
+<p>Estado atual do dispositivo (relé, WiFi, MQTT, SDM120).</p>
+
+<h4><code>POST /api/control</code></h4>
+<p>Liga/desliga o relé via ação web.</p>
+<pre><code>// Liga por 15 min
+{"action": "on", "duration_min": 15}
+// Desliga
+{"action": "off"}
+// Resposta
+{"success": true}</code></pre>
+
+<h4><code>GET /api/history</code></h4>
+<p>Histórico de ativações (máx. 10 registros).</p>
+<pre><code>{"history": [{"date":"17/07/2026","duration_sec":1800,"energy_kwh":0.6,"completed":true}], "count": 1}</code></pre>
+
+<h4><code>GET /api/schedules</code></h4>
+<p>Agendamentos futuros.</p>
+<pre><code>{"schedules": [{"id":77,"start":"17/07/2026 10:00:00","end":"17/07/2026 10:30:00","executed":false}], "count": 1}</code></pre>
+
+<h4><code>GET /api/config</code></h4>
+<p>Configuração salva em NVS.</p>
+
+<h4><code>POST /api/config</code></h4>
+<p>Salva configuração (requer reboot).</p>
+<pre><code>// Resposta
+{"success": true, "needs_reboot": true}</code></pre>
+
+<h4><code>GET /api/scan</code></h4>
+<p>Escaneia redes WiFi disponíveis.</p>
+
+<h4><code>POST /api/ota</code></h4>
+<p>Atualização OTA via URL.</p>
+<pre><code>{"url": "https://exemplo.com/firmware.bin"}</code></pre>
+
+<h4><code>POST /api/restart</code></h4>
+<p>Reinicia o ESP32.</p>
+
+<!-- ========== 6 ========== -->
+<h2>6. Armazenamento (NVS)</h2>
+<p>Namespace: <code>balizamento</code></p>
+<table>
+<thead><tr><th>Chave</th><th>Tipo</th><th>Conteúdo</th></tr></thead>
+<tbody>
+<tr><td><code>config</code></td><td><code>SavedConfig</code> (blob)</td><td>WiFi, MQTT, timezone</td></tr>
+<tr><td><code>schedule_count</code></td><td>i32</td><td>Nº de agendamentos</td></tr>
+<tr><td><code>schedule_N</code></td><td><code>ScheduledEvent</code> (blob)</td><td>Agendamento N</td></tr>
+<tr><td><code>history_count</code></td><td>i32</td><td>Nº de registros históricos</td></tr>
+<tr><td><code>rec_N</code></td><td><code>HistoryEntry</code> (blob)</td><td>Registro histórico N</td></tr>
+</tbody>
+</table>
+
+<!-- ========== 7 ========== -->
+<h2>7. Estruturas de Dados</h2>
+
+<h3>SavedConfig</h3>
+<table>
+<thead><tr><th>Campo</th><th>Tipo</th><th>Tamanho</th></tr></thead>
+<tbody>
+<tr><td><code>wifi_ssid</code></td><td>char[]</td><td>33</td></tr>
+<tr><td><code>wifi_password</code></td><td>char[]</td><td>65</td></tr>
+<tr><td><code>mqtt_broker</code></td><td>char[]</td><td>129</td></tr>
+<tr><td><code>mqtt_port</code></td><td>uint16_t</td><td>2</td></tr>
+<tr><td><code>mqtt_username</code></td><td>char[]</td><td>65</td></tr>
+<tr><td><code>mqtt_password</code></td><td>char[]</td><td>65</td></tr>
+<tr><td><code>mqtt_topic_suffix</code></td><td>char[]</td><td>65</td></tr>
+<tr><td><code>timezone</code></td><td>char[]</td><td>33</td></tr>
+</tbody>
+</table>
+
+<h3>ScheduledEvent</h3>
+<table>
+<thead><tr><th>Campo</th><th>Tipo</th><th>Descrição</th></tr></thead>
+<tbody>
+<tr><td><code>id</code></td><td>uint32_t</td><td>ID único</td></tr>
+<tr><td><code>start_timestamp</code></td><td>uint32_t</td><td>Unix timestamp de início</td></tr>
+<tr><td><code>end_timestamp</code></td><td>uint32_t</td><td>Unix timestamp de fim</td></tr>
+<tr><td><code>duration_sec</code></td><td>uint32_t</td><td>Duração em segundos</td></tr>
+<tr><td><code>executed</code></td><td>bool</td><td>Se já foi executado</td></tr>
+</tbody>
+</table>
+
+<h3>HistoryEntry</h3>
+<table>
+<thead><tr><th>Campo</th><th>Tipo</th><th>Descrição</th></tr></thead>
+<tbody>
+<tr><td><code>timestamp</code></td><td>uint32_t</td><td>Unix timestamp do fim</td></tr>
+<tr><td><code>duration_sec</code></td><td>uint32_t</td><td>Duração em segundos</td></tr>
+<tr><td><code>energy_kwh</code></td><td>float</td><td>Energia consumida (kWh)</td></tr>
+<tr><td><code>completed</code></td><td>bool</td><td>Se finalizou normalmente</td></tr>
+<tr><td><code>has_energy</code></td><td>bool</td><td>Se havia dado de energia</td></tr>
+</tbody>
+</table>
+
+<!-- ========== 8 ========== -->
+<h2>8. Timezone</h2>
+<p>O ESPHome não chama <code>setenv("TZ")</code>/<code>tzset()</code> em plataformas embarcadas. O firmware chama explicitamente com formato POSIX para que <code>mktime()</code> interprete <code>struct tm</code> como hora local.</p>
+<table>
+<thead><tr><th>Config (IANA)</th><th>POSIX aplicado</th><th>Offset</th></tr></thead>
+<tbody>
+<tr><td><code>America/Sao_Paulo</code> (padrão)</td><td><code>BRT3</code></td><td>UTC-3</td></tr>
+<tr><td><code>America/Manaus</code></td><td><code>BRT4</code></td><td>UTC-4</td></tr>
+<tr><td><code>America/Noronha</code></td><td><code>BRT2</code></td><td>UTC-2</td></tr>
+</tbody>
+</table>
+
+</body>
+</html>

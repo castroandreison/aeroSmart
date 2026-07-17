@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import Layout from '@/components/Layout'
-import { AgendamentosAPI, AeronavesAPI } from '@/services/api'
+import { AgendamentosAPI, AeronavesAPI, AeroclubesAPI } from '@/services/api'
 import toast from 'react-hot-toast'
 
 function hojeStr() {
@@ -10,12 +10,14 @@ function hojeStr() {
 export default function SolicitanteAgendamentos() {
   const [agendamentos, setAgendamentos] = useState<any[]>([])
   const [aeronaves, setAeronaves] = useState<any[]>([])
+  const [aeroclubes, setAeroclubes] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, observacoes: '' })
+  const [form, setForm] = useState({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
 
   const load = useCallback(() => {
     AgendamentosAPI.listar(true).then(setAgendamentos).catch(() => {})
     AeronavesAPI.listar().then(setAeronaves).catch(() => {})
+    AeroclubesAPI.listar().then(setAeroclubes).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -32,14 +34,22 @@ export default function SolicitanteAgendamentos() {
 
   const handleCreate = async (e: any) => {
     e.preventDefault()
+    if (!form.aeronave_id || form.aeronave_id === 0) {
+      toast.error('Selecione uma aeronave')
+      return
+    }
+    if (!form.aeroclube_id || form.aeroclube_id === 0) {
+      toast.error('Selecione um aeroclube')
+      return
+    }
     const ano = new Date().getFullYear()
     const data = `${ano}-${String(form.data_mes).padStart(2, '0')}-${String(form.data_dia).padStart(2, '0')}`
-    const payload = { data, hora_inicio: form.hora_inicio, hora_termino: form.hora_termino, aeronave_id: form.aeronave_id, observacoes: form.observacoes }
+    const payload = { data, hora_inicio: form.hora_inicio, hora_termino: form.hora_termino, aeronave_id: form.aeronave_id, aeroclube_id: form.aeroclube_id, observacoes: form.observacoes }
     try {
       await AgendamentosAPI.criar(payload)
       toast.success('Agendamento criado!')
       setShowForm(false)
-      setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, observacoes: '' })
+      setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
       load()
     } catch (err: any) { toast.error(err.response?.data?.detail || 'Erro') }
   }
@@ -93,6 +103,16 @@ export default function SolicitanteAgendamentos() {
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Aeroclube</label>
+              <select value={form.aeroclube_id} onChange={(e) => setForm({ ...form, aeroclube_id: Number(e.target.value) })}
+                className="w-full px-3 py-2 border rounded-lg" required>
+                <option value={0}>Selecione</option>
+                {aeroclubes.map((a: any) => (
+                  <option key={a.id} value={a.id}>{a.nome}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium mb-1">Início</label>
               <input type="time" value={form.hora_inicio} onChange={(e) => setForm({ ...form, hora_inicio: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg" required />
@@ -108,7 +128,8 @@ export default function SolicitanteAgendamentos() {
                 className="w-full px-3 py-2 border rounded-lg" rows={2} />
             </div>
           </div>
-          <button type="submit" className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+          <button type="submit" disabled={!form.aeronave_id || form.aeronave_id === 0 || !form.aeroclube_id || form.aeroclube_id === 0}
+            className="mt-4 px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition">
             Agendar
           </button>
         </form>
@@ -119,6 +140,7 @@ export default function SolicitanteAgendamentos() {
           <thead className="bg-gray-50">
             <tr>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Data/Hora</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Aeroclube</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Aeronave</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Status</th>
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">Ações</th>
@@ -128,6 +150,7 @@ export default function SolicitanteAgendamentos() {
             {filteredAgendamentos.map((a: any) => (
               <tr key={a.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">{new Date(a.hora_inicio).toLocaleString('pt-BR')}</td>
+                <td className="px-4 py-3">{a.aeroclube_nome || '-'}</td>
                 <td className="px-4 py-3">{a.aeronave_matricula} - {a.aeronave_modelo}</td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${

@@ -127,7 +127,6 @@ export default function AdminAeronaves() {
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Matrícula</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Modelo</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Proprietário</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Aeroclube</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Fabricante</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Tipo</th>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Peso Máx</th>
@@ -140,7 +139,6 @@ export default function AdminAeronaves() {
                 <td className="px-4 py-3 font-medium text-gray-200">{a.matricula}</td>
                 <td className="px-4 py-3 text-gray-300">{a.modelo}</td>
                 <td className="px-4 py-3 text-gray-300">{a.usuario_nome || '-'}</td>
-                <td className="px-4 py-3 text-gray-300">{a.aeroclube || '-'}</td>
                 <td className="px-4 py-3 text-gray-300">{a.fabricante || '-'}</td>
                 <td className="px-4 py-3 text-gray-300">{a.tipo || '-'}</td>
                 <td className="px-4 py-3 text-gray-300">{a.peso_maximo ? `${a.peso_maximo} kg` : '-'}</td>

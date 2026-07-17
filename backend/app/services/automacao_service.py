@@ -7,7 +7,7 @@ import httpx
 import json
 import asyncio
 
-from app.core.timezone import agora_sp
+from app.core.timezone import agora_sp, SAO_PAULO_TZ
 from app.models.controlador import Controlador
 from app.models.acionamento import Acionamento
 from app.models.agendamento import Agendamento, StatusAgendamento
@@ -33,12 +33,12 @@ class AutomacaoService:
     async def _obter_aeroclube_do_agendamento(self, agendamento_id: int) -> tuple[Optional[int], Optional[str]]:
         result = await self.session.execute(
             select(Agendamento)
-            .options(selectinload(Agendamento.solicitante).selectinload(Usuario.aeroclube_rel))
+            .options(selectinload(Agendamento.aeroclube_rel))
             .where(Agendamento.id == agendamento_id)
         )
         ag = result.scalar_one_or_none()
-        if ag and ag.solicitante and ag.solicitante.aeroclube_rel:
-            return ag.solicitante.aeroclube_rel.id, ag.solicitante.aeroclube_rel.nome
+        if ag and ag.aeroclube_rel:
+            return ag.aeroclube_rel.id, ag.aeroclube_rel.nome
         return None, None
 
     async def ligar_pista(self, agendamento_id: int) -> bool:
@@ -254,7 +254,10 @@ class AutomacaoService:
                 "comando_confirmado": None,
             }
 
-        tempo_ligado = (now - acionamento.data_hora_ligamento).total_seconds()
+        dh_lig = acionamento.data_hora_ligamento
+        if dh_lig and dh_lig.tzinfo is None:
+            dh_lig = dh_lig.replace(tzinfo=SAO_PAULO_TZ)
+        tempo_ligado = (now - dh_lig).total_seconds() if dh_lig else 0
 
         agendamento_result = await self.session.execute(
             select(Agendamento).where(Agendamento.id == acionamento.agendamento_id)
@@ -262,8 +265,11 @@ class AutomacaoService:
         agendamento = agendamento_result.scalar_one_or_none()
 
         tempo_restante = 0
-        if agendamento:
-            tempo_restante = (agendamento.hora_termino - now).total_seconds()
+        if agendamento and agendamento.hora_termino:
+            ht = agendamento.hora_termino
+            if ht.tzinfo is None:
+                ht = ht.replace(tzinfo=SAO_PAULO_TZ)
+            tempo_restante = (ht - now).total_seconds()
 
         return {
             **base,

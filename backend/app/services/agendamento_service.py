@@ -53,7 +53,7 @@ class AgendamentoService:
     async def listar(
         self, usuario_id: Optional[int] = None, data_inicio: Optional[date] = None, data_fim: Optional[date] = None, status: Optional[str] = None, aeroclube_id: Optional[int] = None, incluir_finalizados: bool = False
     ) -> List[Agendamento]:
-        query = select(Agendamento).options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave))
+        query = select(Agendamento).options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave), selectinload(Agendamento.aeroclube_rel))
         if usuario_id:
             query = query.where(Agendamento.usuario_id == usuario_id)
         if data_inicio:
@@ -63,7 +63,7 @@ class AgendamentoService:
         if status:
             query = query.where(Agendamento.status == StatusAgendamento(status))
         if aeroclube_id:
-            query = query.join(Usuario, Usuario.id == Agendamento.usuario_id).where(Usuario.aeroclube_id == aeroclube_id)
+            query = query.where(Agendamento.aeroclube_id == aeroclube_id)
         if not incluir_finalizados:
             agora = agora_sp()
             query = query.where(
@@ -83,7 +83,7 @@ class AgendamentoService:
     async def obter_por_id(self, agendamento_id: int) -> Optional[Agendamento]:
         result = await self.session.execute(
             select(Agendamento)
-            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave))
+            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave), selectinload(Agendamento.aeroclube_rel))
             .where(Agendamento.id == agendamento_id)
         )
         return result.scalar_one_or_none()
@@ -95,6 +95,8 @@ class AgendamentoService:
 
         if data.aeronave_id <= 0:
             raise ValueError("Selecione uma aeronave válida")
+        if data.aeroclube_id <= 0:
+            raise ValueError("Selecione um aeroclube")
         if data_date < agora_sp().date():
             raise ValueError("Nao e permitido agendar para datas passadas")
         if hora_inicio >= hora_termino:
@@ -109,6 +111,7 @@ class AgendamentoService:
             hora_inicio=hora_inicio,
             hora_termino=hora_termino,
             aeronave_id=data.aeronave_id,
+            aeroclube_id=data.aeroclube_id,
             usuario_id=usuario_id,
             observacoes=data.observacoes,
             status=StatusAgendamento.AGENDADO,
@@ -119,7 +122,7 @@ class AgendamentoService:
         # Force load lazy relationships for async safety
         agendamento = (await self.session.execute(
             select(Agendamento)
-            .options(selectinload(Agendamento.solicitante).selectinload(Usuario.aeroclube_rel), selectinload(Agendamento.aeronave))
+            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave), selectinload(Agendamento.aeroclube_rel))
             .where(Agendamento.id == agendamento.id)
         )).scalar_one()
         return agendamento
@@ -163,7 +166,7 @@ class AgendamentoService:
         await self.session.commit()
         agendamento = (await self.session.execute(
             select(Agendamento)
-            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave))
+            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave), selectinload(Agendamento.aeroclube_rel))
             .where(Agendamento.id == agendamento.id)
         )).scalar_one()
         return agendamento

@@ -14,7 +14,6 @@ from app.models.log import Log
 from app.models.agendamento import Agendamento, StatusAgendamento
 from app.models.acionamento import Acionamento
 from app.models.aeroclube import Aeroclube
-from app.models.usuario import Usuario
 from app.core.timezone import agora_sp
 
 
@@ -542,8 +541,7 @@ class MqttService:
         try:
             result = await session.execute(
                 select(Agendamento)
-                .join(Usuario, Usuario.id == Agendamento.usuario_id)
-                .join(Aeroclube, Aeroclube.id == Usuario.aeroclube_id)
+                .join(Aeroclube, Aeroclube.id == Agendamento.aeroclube_id)
                 .where(Aeroclube.nome == station_name)
                 .where(Agendamento.status == StatusAgendamento.EM_ANDAMENTO)
                 .order_by(Agendamento.id.desc())

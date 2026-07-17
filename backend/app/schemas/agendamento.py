@@ -8,6 +8,7 @@ class AgendamentoCreate(BaseModel):
     hora_inicio: str
     hora_termino: str
     aeronave_id: int
+    aeroclube_id: int
     observacoes: Optional[str] = None
 
 
@@ -16,6 +17,7 @@ class AgendamentoUpdate(BaseModel):
     hora_inicio: Optional[str] = None
     hora_termino: Optional[str] = None
     aeronave_id: Optional[int] = None
+    aeroclube_id: Optional[int] = None
     observacoes: Optional[str] = None
 
 
@@ -28,6 +30,8 @@ class AgendamentoResponse(BaseModel):
     status: str
     usuario_id: int
     aeronave_id: int
+    aeroclube_id: Optional[int] = None
+    aeroclube_nome: Optional[str] = None
     solicitante_nome: Optional[str] = None
     aeronave_matricula: Optional[str] = None
     aeronave_modelo: Optional[str] = None

@@ -9,6 +9,7 @@ from app.core.database import get_session
 from app.core.security import get_current_user
 from app.models.usuario import Usuario, NivelAcesso
 from app.models.agendamento import Agendamento
+from app.models.aeroclube import Aeroclube
 from app.schemas.agendamento import AgendamentoCreate, AgendamentoUpdate, AgendamentoResponse
 from app.services.agendamento_service import AgendamentoService
 from app.services.usuario_service import UsuarioService
@@ -17,16 +18,24 @@ from app.services.mqtt_service import mqtt_service
 router = APIRouter(prefix="/agendamentos", tags=["Agendamentos"])
 
 
-async def _aeroclube_do_ag(ag: Agendamento) -> tuple:
-    """Extrai (id, nome) do aeroclube do agendamento (relacao ja carregada)"""
-    if ag and ag.solicitante and ag.solicitante.aeroclube_rel:
-        return ag.solicitante.aeroclube_rel.id, ag.solicitante.aeroclube_rel.nome
+async def _aeroclube_do_ag(ag: Agendamento, session: AsyncSession = None) -> tuple:
+    """Extrai (id, nome) do aeroclube do agendamento.
+    Tenta relacao carregada primeiro; se nao encontrada, busca no banco."""
+    if ag and ag.aeroclube_rel:
+        return ag.aeroclube_rel.id, ag.aeroclube_rel.nome
+    if ag and ag.aeroclube_id and session:
+        result = await session.execute(
+            select(Aeroclube).where(Aeroclube.id == ag.aeroclube_id)
+        )
+        aero = result.scalar_one_or_none()
+        if aero:
+            return aero.id, aero.nome
     return None, None
 
 
-async def _publicar_agendamento_mqtt(ag: Agendamento):
+async def _publicar_agendamento_mqtt(ag: Agendamento, session: AsyncSession = None):
     """Envia dados do agendamento para a estacao via MQTT"""
-    aero_id, aero_nome = await _aeroclube_do_ag(ag)
+    aero_id, aero_nome = await _aeroclube_do_ag(ag, session)
     if not aero_id or not aero_nome:
         print(f"[agendamentos] Agendamento {ag.id}: aeroclube nao encontrado, pulando MQTT")
         return
@@ -46,9 +55,9 @@ async def _publicar_agendamento_mqtt(ag: Agendamento):
         print(f"[agendamentos] Erro ao publicar agendamento {ag.id} via MQTT: {e}")
 
 
-async def _cancelar_agendamento_mqtt(ag: Agendamento):
+async def _cancelar_agendamento_mqtt(ag: Agendamento, session: AsyncSession = None):
     """Envia cancelamento do agendamento para a estacao via MQTT"""
-    aero_id, aero_nome = await _aeroclube_do_ag(ag)
+    aero_id, aero_nome = await _aeroclube_do_ag(ag, session)
     if not aero_id or not aero_nome:
         return
     print(f"[agendamentos] Cancelando agendamento {ag.id} via MQTT para {aero_nome}")
@@ -90,6 +99,8 @@ async def listar_agendamentos(
             status=a.status.value if hasattr(a.status, 'value') else a.status,
             usuario_id=a.usuario_id,
             aeronave_id=a.aeronave_id,
+            aeroclube_id=a.aeroclube_id,
+            aeroclube_nome=a.aeroclube_rel.nome if a.aeroclube_rel else None,
             solicitante_nome=a.solicitante.nome_completo if a.solicitante else None,
             aeronave_matricula=a.aeronave.matricula if a.aeronave else None,
             aeronave_modelo=a.aeronave.modelo if a.aeronave else None,
@@ -122,6 +133,8 @@ async def obter_agendamento(
         status=agendamento.status.value if hasattr(agendamento.status, 'value') else agendamento.status,
         usuario_id=agendamento.usuario_id,
         aeronave_id=agendamento.aeronave_id,
+        aeroclube_id=agendamento.aeroclube_id,
+        aeroclube_nome=agendamento.aeroclube_rel.nome if agendamento.aeroclube_rel else None,
         solicitante_nome=agendamento.solicitante.nome_completo if agendamento.solicitante else None,
         aeronave_matricula=agendamento.aeronave.matricula if agendamento.aeronave else None,
         aeronave_modelo=agendamento.aeronave.modelo if agendamento.aeronave else None,
@@ -152,7 +165,7 @@ async def criar_agendamento(
         dif = (agendamento.hora_termino - agendamento.hora_inicio).total_seconds() / 60 if agendamento.hora_inicio and agendamento.hora_termino else None
 
         # Publica agendamento via MQTT para a estacao
-        await _publicar_agendamento_mqtt(agendamento)
+        await _publicar_agendamento_mqtt(agendamento, session)
 
         return AgendamentoResponse(
             id=agendamento.id,
@@ -163,6 +176,8 @@ async def criar_agendamento(
             status=agendamento.status.value if hasattr(agendamento.status, 'value') else agendamento.status,
             usuario_id=agendamento.usuario_id,
             aeronave_id=agendamento.aeronave_id,
+            aeroclube_id=agendamento.aeroclube_id,
+            aeroclube_nome=agendamento.aeroclube_rel.nome if agendamento.aeroclube_rel else None,
             solicitante_nome=agendamento.solicitante.nome_completo if agendamento.solicitante else None,
             aeronave_matricula=agendamento.aeronave.matricula if agendamento.aeronave else None,
             aeronave_modelo=agendamento.aeronave.modelo if agendamento.aeronave else None,
@@ -188,7 +203,7 @@ async def atualizar_agendamento(
         dif = (agendamento.hora_termino - agendamento.hora_inicio).total_seconds() / 60 if agendamento.hora_inicio and agendamento.hora_termino else None
 
         # Publica atualizacao do agendamento via MQTT
-        await _publicar_agendamento_mqtt(agendamento)
+        await _publicar_agendamento_mqtt(agendamento, session)
 
         return AgendamentoResponse(
             id=agendamento.id,
@@ -199,6 +214,8 @@ async def atualizar_agendamento(
             status=agendamento.status.value if hasattr(agendamento.status, 'value') else agendamento.status,
             usuario_id=agendamento.usuario_id,
             aeronave_id=agendamento.aeronave_id,
+            aeroclube_id=agendamento.aeroclube_id,
+            aeroclube_nome=agendamento.aeroclube_rel.nome if agendamento.aeroclube_rel else None,
             solicitante_nome=agendamento.solicitante.nome_completo if agendamento.solicitante else None,
             aeronave_matricula=agendamento.aeronave.matricula if agendamento.aeronave else None,
             aeronave_modelo=agendamento.aeronave.modelo if agendamento.aeronave else None,
@@ -220,7 +237,7 @@ async def excluir_agendamento(
         # Carrega agendamento com relacoes antes de excluir
         ag_del = await service.obter_por_id(agendamento_id)
         if ag_del:
-            await _cancelar_agendamento_mqtt(ag_del)
+            await _cancelar_agendamento_mqtt(ag_del, session)
 
         success = await service.excluir(agendamento_id)
         if not success:

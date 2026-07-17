@@ -30,8 +30,6 @@ class AeronaveResponse(BaseModel):
     operador: Optional[str] = None
     usuario_id: int
     usuario_nome: Optional[str] = None
-    aeroclube: Optional[str] = None
-    aeroclube_id: Optional[int] = None
 
     class Config:
         from_attributes = True

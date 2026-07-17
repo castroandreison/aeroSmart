@@ -28,6 +28,7 @@ class Agendamento(Base):
 
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     aeronave_id = Column(Integer, ForeignKey("aeronaves.id"), nullable=False)
+    aeroclube_id = Column(Integer, ForeignKey("aeroclubes.id"), nullable=True)
 
     created_at = Column(DateTime(), server_default=func.now())
     updated_at = Column(DateTime(), onupdate=func.now())
@@ -35,5 +36,6 @@ class Agendamento(Base):
 
     solicitante = relationship("Usuario", back_populates="agendamentos")
     aeronave = relationship("Aeronave", back_populates="agendamentos")
+    aeroclube_rel = relationship("Aeroclube", back_populates="agendamentos")
     acionamento = relationship("Acionamento", back_populates="agendamento", uselist=False)
     financeiro = relationship("Financeiro", back_populates="agendamento", uselist=False)

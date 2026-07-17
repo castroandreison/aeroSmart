@@ -16,13 +16,8 @@ router = APIRouter(prefix="/aeronaves", tags=["Aeronaves"])
 
 def _build_aero_response(aeronave: Aeronave) -> dict:
     nome = None
-    aero_nome = None
-    aero_id = None
     if aeronave.proprietario:
         nome = aeronave.proprietario.nome_completo
-        if aeronave.proprietario.aeroclube_rel:
-            aero_nome = aeronave.proprietario.aeroclube_rel.nome
-            aero_id = aeronave.proprietario.aeroclube_id
     return {
         "id": aeronave.id,
         "matricula": aeronave.matricula,
@@ -33,8 +28,6 @@ def _build_aero_response(aeronave: Aeronave) -> dict:
         "operador": aeronave.operador,
         "usuario_id": aeronave.usuario_id,
         "usuario_nome": nome,
-        "aeroclube": aero_nome,
-        "aeroclube_id": aero_id,
     }
 
 

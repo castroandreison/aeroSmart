@@ -30,10 +30,14 @@ class ConfiguracaoResponse(BaseModel):
 @router.get("/", response_model=List[ConfiguracaoResponse])
 async def listar_configuracoes(
     session: AsyncSession = Depends(get_session),
-    admin: Usuario = Depends(verificar_admin_ou_proprietario),
+    current_user: Usuario = Depends(verificar_admin_ou_proprietario),
 ):
     service = ConfiguracaoService(session)
-    return await service.listar_todas()
+    configs = await service.listar_todas(aeroclube_id=current_user.aeroclube_id)
+    if not configs and current_user.aeroclube_id:
+        await service.inicializar_padroes(aeroclube_id=current_user.aeroclube_id)
+        configs = await service.listar_todas(aeroclube_id=current_user.aeroclube_id)
+    return configs
 
 
 @router.put("/{chave}", response_model=ConfiguracaoResponse)
@@ -41,18 +45,18 @@ async def atualizar_configuracao(
     chave: str,
     data: ConfiguracaoUpdate,
     session: AsyncSession = Depends(get_session),
-    admin: Usuario = Depends(verificar_admin_ou_proprietario),
+    current_user: Usuario = Depends(verificar_admin_ou_proprietario),
 ):
     service = ConfiguracaoService(session)
-    config = await service.definir(chave, data.valor, descricao=data.descricao)
+    config = await service.definir(chave, data.valor, descricao=data.descricao, aeroclube_id=current_user.aeroclube_id)
     return config
 
 
 @router.post("/inicializar")
 async def inicializar_configuracoes(
     session: AsyncSession = Depends(get_session),
-    admin: Usuario = Depends(verificar_admin_ou_proprietario),
+    current_user: Usuario = Depends(verificar_admin_ou_proprietario),
 ):
     service = ConfiguracaoService(session)
-    await service.inicializar_padroes()
+    await service.inicializar_padroes(aeroclube_id=current_user.aeroclube_id)
     return {"message": "Configurações iniciais criadas com sucesso"}

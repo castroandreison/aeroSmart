@@ -63,12 +63,13 @@ async def dashboard_admin(
     )
     agendamentos_futuros = await session.execute(
         _apply_ac_filter(select(func.count(Agendamento.id)).where(
-            Agendamento.status == StatusAgendamento.AGENDADO,
-            Agendamento.hora_inicio > func.now(),
+            Agendamento.status.in_([StatusAgendamento.AGENDADO, StatusAgendamento.CONFIRMADO]),
+            Agendamento.hora_inicio > agora,
         ))
     )
     from datetime import datetime
-    inicio_mes = datetime.now().replace(day=1).date()
+    agora = datetime.now()
+    inicio_mes = agora.replace(day=1).date()
     fim_mes = datetime.now().date()
 
     agendamentos_concluidos = await session.execute(

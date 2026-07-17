@@ -59,4 +59,4 @@ async def calcular_custos(
     current_user: Usuario = Depends(get_current_user),
 ):
     service = FinanceiroService(session)
-    return await service.calcular_custos(tempo_minutos)
+    return await service.calcular_custos(tempo_minutos, aeroclube_id=current_user.aeroclube_id)

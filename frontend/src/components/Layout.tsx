@@ -22,27 +22,38 @@ const solicitanteNav = [
   { href: '/solicitante/relatorios', label: 'Relatórios', icon: FileText },
 ]
 
+const administradorNav = [
+  { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/admin/agendamentos', label: 'Agendamentos', icon: Calendar },
+  { href: '/admin/usuarios', label: 'Usuários', icon: Users },
+  { href: '/admin/aeronaves', label: 'Aeronaves', icon: Plane },
+  { href: '/admin/monitoramento', label: 'Monitoramento', icon: Monitor },
+  { href: '/admin/financeiro', label: 'Financeiro', icon: DollarSign },
+  { href: '/admin/relatorios', label: 'Relatórios', icon: FileText },
+  { href: '/admin/configuracoes', label: 'Configurações', icon: Settings },
+]
+
+const proprietarioNav = [
+  { href: '/admin/dashboard-proprietario', label: 'Visão Geral', icon: TrendingUp },
+  { href: '/admin/agendamentos', label: 'Agendamentos', icon: Calendar },
+  { href: '/admin/usuarios', label: 'Usuários', icon: Users },
+  { href: '/admin/aeroclubes', label: 'Aeroclubes', icon: Building2 },
+  { href: '/admin/aeronaves', label: 'Aeronaves', icon: Plane },
+  { href: '/admin/monitoramento', label: 'Monitoramento', icon: Monitor },
+  { href: '/admin/financeiro', label: 'Financeiro', icon: DollarSign },
+  { href: '/admin/relatorios', label: 'Relatórios', icon: FileText },
+  { href: '/admin/energia', label: 'Energia', icon: Zap },
+  { href: '/admin/logs', label: 'Logs', icon: Wifi },
+]
+
 export default function Layout({ children, title }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { user, logout, isAdmin, updateUser } = useAuth()
   const router = useRouter()
 
-  const adminNav = [
-    { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/admin/agendamentos', label: 'Agendamentos', icon: Calendar },
-    ...(user?.nivel_acesso === 'proprietario' ? [{ href: '/admin/dashboard-proprietario', label: 'Visão Geral', icon: TrendingUp }] : []),
-    { href: '/admin/usuarios', label: 'Usuários', icon: Users },
-    { href: '/admin/aeroclubes', label: 'Aeroclubes', icon: Building2 },
-    { href: '/admin/aeronaves', label: 'Aeronaves', icon: Plane },
-    { href: '/admin/monitoramento', label: 'Monitoramento', icon: Monitor },
-    { href: '/admin/financeiro', label: 'Financeiro', icon: DollarSign },
-    { href: '/admin/relatorios', label: 'Relatórios', icon: FileText },
-    { href: '/admin/configuracoes', label: 'Configurações', icon: Settings },
-    { href: '/admin/mqtt-config', label: 'MQTT Config', icon: Radio },
-    { href: '/admin/energia', label: 'Energia', icon: Zap },
-    { href: '/admin/logs', label: 'Logs', icon: Wifi },
-  ]
-  const navItems = isAdmin ? adminNav : solicitanteNav
+  const navItems = user?.nivel_acesso === 'proprietario' ? proprietarioNav
+    : user?.nivel_acesso === 'administrador' ? administradorNav
+    : solicitanteNav
 
   const handleLogout = () => {
     logout()

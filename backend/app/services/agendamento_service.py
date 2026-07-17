@@ -41,9 +41,9 @@ class AgendamentoService:
         result = await self.session.execute(query)
         return result.scalar_one_or_none() is not None
 
-    async def verificar_horario_permitido(self, hora_inicio: datetime, hora_termino: datetime) -> bool:
-        inicio_str = await self.config_service.obter("horario_inicio_operacao", "06:00")
-        fim_str = await self.config_service.obter("horario_fim_operacao", "22:00")
+    async def verificar_horario_permitido(self, hora_inicio: datetime, hora_termino: datetime, aeroclube_id: int = None) -> bool:
+        inicio_str = await self.config_service.obter("horario_inicio_operacao", "06:00", aeroclube_id=aeroclube_id)
+        fim_str = await self.config_service.obter("horario_fim_operacao", "22:00", aeroclube_id=aeroclube_id)
 
         inicio_oper = datetime.strptime(inicio_str, "%H:%M").time()
         fim_oper = datetime.strptime(fim_str, "%H:%M").time()
@@ -101,7 +101,7 @@ class AgendamentoService:
             raise ValueError("Nao e permitido agendar para datas passadas")
         if hora_inicio >= hora_termino:
             raise ValueError("Horário de inicio deve ser anterior ao horário de termino")
-        if not await self.verificar_horario_permitido(hora_inicio, hora_termino):
+        if not await self.verificar_horario_permitido(hora_inicio, hora_termino, aeroclube_id=data.aeroclube_id):
             raise ValueError("Horário fora do periodo de operaçao permitido")
         if await self.verificar_conflito(data_date, hora_inicio, hora_termino, data.aeronave_id):
             raise ValueError("Conflito de horário com outro agendamento")

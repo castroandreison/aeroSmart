@@ -15,13 +15,13 @@ class FinanceiroService:
         self.session = session
         self.config_service = ConfiguracaoService(session)
 
-    async def calcular_custos(self, tempo_ligado_minutos: float) -> dict:
-        potencia_kw = await self.config_service.obter_float("potencia_instalada_kw", 12)
-        valor_kwh = await self.config_service.obter_float("valor_kwh", 0.80)
-        valor_acionamento = await self.config_service.obter_float("valor_acionamento", 50)
-        tempo_minimo = await self.config_service.obter_int("tempo_minimo_cobranca_min", 30)
-        impostos_percent = await self.config_service.obter_float("impostos_percentual", 0)
-        taxas_extras = await self.config_service.obter_float("taxas_extras", 0)
+    async def calcular_custos(self, tempo_ligado_minutos: float, aeroclube_id: int = None) -> dict:
+        potencia_kw = await self.config_service.obter_float("potencia_instalada_kw", 12, aeroclube_id=aeroclube_id)
+        valor_kwh = await self.config_service.obter_float("valor_kwh", 0.80, aeroclube_id=aeroclube_id)
+        valor_acionamento = await self.config_service.obter_float("valor_acionamento", 50, aeroclube_id=aeroclube_id)
+        tempo_minimo = await self.config_service.obter_int("tempo_minimo_cobranca_min", 30, aeroclube_id=aeroclube_id)
+        impostos_percent = await self.config_service.obter_float("impostos_percentual", 0, aeroclube_id=aeroclube_id)
+        taxas_extras = await self.config_service.obter_float("taxas_extras", 0, aeroclube_id=aeroclube_id)
 
         tempo_cobrado = max(tempo_ligado_minutos, tempo_minimo)
         energia_kwh = potencia_kw * (tempo_cobrado / 60)

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, Text, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Float, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -6,14 +7,18 @@ from app.core.database import Base
 
 class Configuracao(Base):
     __tablename__ = "configuracoes"
+    __table_args__ = (UniqueConstraint("chave", "aeroclube_id", name="uq_config_chave_aeroclube"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    chave = Column(String(100), unique=True, nullable=False, index=True)
+    chave = Column(String(100), nullable=False, index=True)
     valor = Column(Text, nullable=True)
     tipo = Column(String(50), default="texto")
     descricao = Column(String(255), nullable=True)
+    aeroclube_id = Column(Integer, ForeignKey("aeroclubes.id"), nullable=True, index=True)
     created_at = Column(DateTime(), server_default=func.now())
     updated_at = Column(DateTime(), onupdate=func.now())
+
+    aeroclube = relationship("Aeroclube")
 
     @classmethod
     def chaves_padrao(cls):

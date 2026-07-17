@@ -59,8 +59,14 @@ async def criar_usuario(
     session: AsyncSession = Depends(get_session),
     current_user: Usuario = Depends(verificar_admin_ou_proprietario),
 ):
-    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and data.aeroclube_id and data.aeroclube_id != current_user.aeroclube_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você só pode criar usuários no seu aeroclube")
+    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR:
+        if data.nivel_acesso != NivelAcesso.SOLICITANTE.value:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrador só pode criar solicitantes")
+        if data.aeroclube_id and data.aeroclube_id != current_user.aeroclube_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você só pode criar usuários no seu aeroclube")
+    elif current_user.nivel_acesso == NivelAcesso.PROPRIETARIO:
+        if data.nivel_acesso != NivelAcesso.ADMINISTRADOR.value:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Proprietário só pode criar administradores")
     service = UsuarioService(session)
     existing = await service.obter_por_email(data.email)
     if existing:
@@ -93,6 +99,11 @@ async def atualizar_usuario(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
     if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and current_user.aeroclube_id != usuario.aeroclube_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário não pertence ao seu aeroclube")
+    if data.nivel_acesso is not None:
+        if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and data.nivel_acesso != NivelAcesso.SOLICITANTE.value:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrador só pode alterar para solicitante")
+        if current_user.nivel_acesso == NivelAcesso.PROPRIETARIO and data.nivel_acesso != NivelAcesso.ADMINISTRADOR.value:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Proprietário só pode alterar para administrador")
     usuario = await service.atualizar(usuario_id, data)
     return usuario
 

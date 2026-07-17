@@ -1658,7 +1658,7 @@ void BalizamentoController::checkSchedules() {
       saveSchedules();
       publishScheduleStatus(s.id, "AgendamentoAndamento", "em_andamento");
     }
-    if (s.executed && now >= (time_t)s.end_timestamp && relay_on_) {
+    if (s.executed && now >= (time_t)s.end_timestamp) {
       ESP_LOGI(TAG, "Agenda %u: finalizando", s.id);
       finishActivation(true);
       publishScheduleStatus(s.id, "AgendamentoFinalizado", "finalizado");

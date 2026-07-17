@@ -14,6 +14,7 @@ from app.models.log import Log
 from app.models.agendamento import Agendamento, StatusAgendamento
 from app.models.acionamento import Acionamento
 from app.models.aeroclube import Aeroclube
+from app.models.usuario import Usuario
 from app.core.timezone import agora_sp
 
 
@@ -467,11 +468,10 @@ class MqttService:
             ag_id = ag.get("id")
             print(f"[MQTT BalRead] {comando} id={ag_id} estacao={station_name}")
 
-            if not comando or not ag_id:
-                return
-
             async with async_session_factory() as session:
                 if comando == "AgendamentoConfirmado":
+                    if not ag_id:
+                        return
                     await session.execute(
                         update(Agendamento)
                         .where(Agendamento.id == ag_id)
@@ -480,74 +480,112 @@ class MqttService:
                     await session.commit()
                     print(f"[MQTT BalRead] Agendamento {ag_id} confirmado")
 
-                elif comando == "AgendamentoAndamento":
-                    now = agora_sp()
-                    result = await session.execute(
-                        select(Acionamento).where(Acionamento.agendamento_id == ag_id)
-                    )
-                    acionamento = result.scalar_one_or_none()
-                    if not acionamento:
-                        acionamento = Acionamento(
-                            agendamento_id=ag_id,
-                            data_hora_ligamento=now,
-                            status="ligado",
-                            confirmado=True,
-                        )
-                        session.add(acionamento)
-                    else:
-                        acionamento.status = "ligado"
-                        acionamento.confirmado = True
+                elif comando in ("AgendamentoAndamento", "AgendamentoFinalizado"):
+                    if not ag_id:
+                        return
+                    await self._atualizar_agendamento_status(session, ag_id, comando, payload)
 
-                    await session.execute(
-                        update(Agendamento)
-                        .where(Agendamento.id == ag_id)
-                        .values(status=StatusAgendamento.EM_ANDAMENTO, updated_at=now)
-                    )
-                    await session.commit()
-                    print(f"[MQTT BalRead] Agendamento {ag_id} em andamento")
-
-                elif comando == "AgendamentoFinalizado":
-                    now = agora_sp()
-                    result = await session.execute(
-                        select(Acionamento).where(Acionamento.agendamento_id == ag_id)
-                    )
-                    acionamento = result.scalar_one_or_none()
-                    if acionamento and not acionamento.data_hora_desligamento:
-                        acionamento.data_hora_desligamento = now
-                        acionamento.data_hora_ligamento = acionamento.data_hora_ligamento or now
-                        acionamento.tempo_ligado_segundos = (
-                            now - acionamento.data_hora_ligamento
-                        ).total_seconds()
-                        acionamento.status = "desligado"
-
-                    await session.execute(
-                        update(Agendamento)
-                        .where(Agendamento.id == ag_id)
-                        .values(status=StatusAgendamento.CONCLUIDO, updated_at=now)
-                    )
-                    await session.commit()
-                    print(f"[MQTT BalRead] Agendamento {ag_id} finalizado")
-
-                elif comando == "ConsumoBalizamento":
-                    now = agora_sp()
-                    result = await session.execute(
-                        select(Acionamento).where(Acionamento.agendamento_id == ag_id)
-                    )
-                    acionamento = result.scalar_one_or_none()
-                    if acionamento:
-                        consumo = payload.get("consumo_kwh", 0)
-                        duracao = payload.get("duracao_segundos", 0)
-                        if not acionamento.data_hora_desligamento:
-                            acionamento.data_hora_desligamento = now
-                        acionamento.tempo_ligado_segundos = duracao or (
-                            now - acionamento.data_hora_ligamento
-                        ).total_seconds()
-                        acionamento.status = "desligado"
-                        acionamento.confirmado = True
-                        await session.commit()
-                        print(f"[MQTT BalRead] Consumo agendamento {ag_id}: {consumo}kWh")
+                elif comando in ("BalOff", "ConsumoBalizamento"):
+                    await self._finalizar_agendamento_estacao(session, station_name, comando, payload)
         except Exception as e:
             print(f"[MQTT BalRead] Erro processando {topic}: {type(e).__name__}: {e}")
+
+    async def _atualizar_agendamento_status(self, session, ag_id, comando, payload):
+        now = agora_sp()
+        if comando == "AgendamentoAndamento":
+            result = await session.execute(
+                select(Acionamento).where(Acionamento.agendamento_id == ag_id)
+            )
+            acionamento = result.scalar_one_or_none()
+            if not acionamento:
+                acionamento = Acionamento(
+                    agendamento_id=ag_id,
+                    data_hora_ligamento=now,
+                    status="ligado",
+                    confirmado=True,
+                )
+                session.add(acionamento)
+            else:
+                acionamento.status = "ligado"
+                acionamento.confirmado = True
+
+            await session.execute(
+                update(Agendamento)
+                .where(Agendamento.id == ag_id)
+                .values(status=StatusAgendamento.EM_ANDAMENTO, updated_at=now)
+            )
+            await session.commit()
+            print(f"[MQTT BalRead] Agendamento {ag_id} em andamento")
+
+        elif comando == "AgendamentoFinalizado":
+            result = await session.execute(
+                select(Acionamento).where(Acionamento.agendamento_id == ag_id)
+            )
+            acionamento = result.scalar_one_or_none()
+            if acionamento and not acionamento.data_hora_desligamento:
+                acionamento.data_hora_desligamento = now
+                acionamento.data_hora_ligamento = acionamento.data_hora_ligamento or now
+                acionamento.tempo_ligado_segundos = (
+                    now - acionamento.data_hora_ligamento
+                ).total_seconds()
+                acionamento.status = "desligado"
+
+            await session.execute(
+                update(Agendamento)
+                .where(Agendamento.id == ag_id)
+                .values(status=StatusAgendamento.CONCLUIDO, updated_at=now)
+            )
+            await session.commit()
+            print(f"[MQTT BalRead] Agendamento {ag_id} finalizado")
+
+    async def _finalizar_agendamento_estacao(self, session, station_name, comando, payload):
+        try:
+            result = await session.execute(
+                select(Agendamento)
+                .join(Usuario, Usuario.id == Agendamento.usuario_id)
+                .join(Aeroclube, Aeroclube.id == Usuario.aeroclube_id)
+                .where(Aeroclube.nome == station_name)
+                .where(Agendamento.status == StatusAgendamento.EM_ANDAMENTO)
+                .order_by(Agendamento.id.desc())
+                .limit(1)
+            )
+            ag = result.scalar_one_or_none()
+            if not ag:
+                print(f"[MQTT BalRead] Nenhum agendamento EM_ANDAMENTO para {station_name}")
+                return
+
+            now = agora_sp()
+            result_ac = await session.execute(
+                select(Acionamento).where(Acionamento.agendamento_id == ag.id)
+            )
+            acionamento = result_ac.scalar_one_or_none()
+
+            if comando == "ConsumoBalizamento":
+                if acionamento and not acionamento.data_hora_desligamento:
+                    acionamento.data_hora_desligamento = now
+                    duracao = payload.get("duracao_segundos", 0)
+                    acionamento.tempo_ligado_segundos = duracao or (
+                        now - acionamento.data_hora_ligamento
+                    ).total_seconds()
+                    acionamento.status = "desligado"
+                    acionamento.confirmado = True
+            else:
+                if acionamento and not acionamento.data_hora_desligamento:
+                    acionamento.data_hora_desligamento = now
+                    acionamento.tempo_ligado_segundos = (
+                        now - acionamento.data_hora_ligamento
+                    ).total_seconds()
+                    acionamento.status = "desligado"
+
+            await session.execute(
+                update(Agendamento)
+                .where(Agendamento.id == ag.id)
+                .values(status=StatusAgendamento.CONCLUIDO, updated_at=now)
+            )
+            await session.commit()
+            print(f"[MQTT BalRead] Estacao {station_name} desligada via {comando}, agendamento {ag.id} concluido")
+        except Exception as e:
+            print(f"[MQTT BalRead] Erro finalizar estacao {station_name}: {type(e).__name__}: {e}")
 
     async def start_bal_read_listener(self):
         if self._bal_read_listener_running:

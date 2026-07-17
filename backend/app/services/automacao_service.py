@@ -71,6 +71,7 @@ class AutomacaoService:
                 "id": ag_obj.id,
                 "data": ag_obj.data.isoformat() if hasattr(ag_obj.data, 'isoformat') else str(ag_obj.data),
                 "horario": ag_obj.hora_inicio.strftime("%H:%M"),
+                "hora_termino": ag_obj.hora_termino.strftime("%H:%M"),
                 "duracao_minutos": round(duracao),
             }
 
@@ -134,12 +135,25 @@ class AutomacaoService:
                 "id": ag_obj.id,
                 "data": ag_obj.data.isoformat() if hasattr(ag_obj.data, 'isoformat') else str(ag_obj.data),
                 "horario": ag_obj.hora_inicio.strftime("%H:%M"),
+                "hora_termino": ag_obj.hora_termino.strftime("%H:%M"),
                 "duracao_minutos": round(duracao),
             }
 
         mqtt_ok = False
         if aero_id and aero_nome:
             mqtt_ok = await mqtt_service.enviar_comando_balizador(aero_id, aero_nome, ligar=False, session=self.session, agendamento_info=ag_info)
+
+        # Se MQTT falhou, pode ser que a estacao ja finalizou sozinha
+        fallback_ok = False
+        if not mqtt_ok and aero_id and aero_nome:
+            print(f"[automacao] BalOff falhou, verificando status da estacao {aero_nome}...")
+            try:
+                hb = await mqtt_service.request_heartbeat(aero_id, aero_nome, timeout=8)
+                if hb and hb.get("balizamento", {}).get("status") == "Inativo":
+                    fallback_ok = True
+                    print(f"[automacao] Estacao ja estava desligada, tratando como sucesso")
+            except Exception:
+                pass
 
         controlador = await self.obter_controlador_ativo()
         try:
@@ -157,21 +171,22 @@ class AutomacaoService:
             now = agora_sp()
             acionamento.data_hora_desligamento = now
             acionamento.tempo_ligado_segundos = (now - acionamento.data_hora_ligamento).total_seconds()
-            acionamento.status = "desligado" if mqtt_ok else "falha_desligamento"
-            acionamento.confirmado = mqtt_ok
+            sucesso = mqtt_ok or fallback_ok
+            acionamento.status = "desligado" if sucesso else "falha_desligamento"
+            acionamento.confirmado = sucesso
 
             # Atualiza status do agendamento via UPDATE direto para evitar cache ORM
             await self.session.execute(
                 update(Agendamento)
                 .where(Agendamento.id == agendamento_id)
                 .values(
-                    status=StatusAgendamento.CONCLUIDO if mqtt_ok else StatusAgendamento.AGUARDANDO_ENCERRAMENTO,
+                    status=StatusAgendamento.CONCLUIDO if sucesso else StatusAgendamento.AGUARDANDO_ENCERRAMENTO,
                     updated_at=agora_sp()
                 )
             )
 
             await self.session.commit()
-            return mqtt_ok
+            return sucesso
 
         except Exception as e:
             acionamento.status = "falha_desligamento"

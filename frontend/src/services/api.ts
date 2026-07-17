@@ -84,6 +84,7 @@ export const MonitoramentoAPI = {
   cameraStatus: () => api.get('/monitoramento/camera/status').then((r) => r.data),
   cameraSnapshot: () => api.get('/monitoramento/camera/snapshot').then((r) => r.data),
   streamStatus: () => `${API_URL}/monitoramento/stream`,
+  heartbeat: () => api.get('/monitoramento/heartbeat').then((r) => r.data),
 }
 
 export const LogsAPI = {

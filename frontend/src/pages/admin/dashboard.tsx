@@ -1,7 +1,39 @@
 import { useEffect, useState, useRef } from 'react'
 import Layout from '@/components/Layout'
 import { MonitoramentoAPI, MqttAPI } from '@/services/api'
-import { Calendar, Plane, DollarSign, Zap, Users, Clock, Activity, Wifi, WifiOff, AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
+import { Calendar, Plane, DollarSign, Zap, Users, Clock, Activity, Wifi, WifiOff, AlertTriangle, CheckCircle, XCircle, Signal, Cpu, HardDrive, Settings } from 'lucide-react'
+
+function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h ${m}m`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+function timeSince(ts: string): string {
+  const diff = Date.now() - new Date(ts).getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return 'agora'
+  if (min < 60) return `${min}min atrás`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h}h atrás`
+  return `${Math.floor(h / 24)}d atrás`
+}
+
+function WifiSignal({ quality }: { quality: number }) {
+  const bars = quality >= 80 ? 4 : quality >= 60 ? 3 : quality >= 40 ? 2 : quality >= 20 ? 1 : 0
+  const color = quality >= 60 ? 'text-green-400' : quality >= 40 ? 'text-yellow-400' : 'text-red-400'
+  return (
+    <div className={`flex items-center gap-1 ${color}`}>
+      {[1, 2, 3, 4].map((i) => (
+        <div key={i} className={`w-1 rounded-full ${i <= bars ? 'bg-current' : 'bg-gray-600'}`} style={{ height: `${6 + i * 3}px` }} />
+      ))}
+      <span className="text-xs ml-1">{quality}%</span>
+    </div>
+  )
+}
 
 export default function AdminDashboard() {
   const [dashboard, setDashboard] = useState<any>(null)
@@ -9,6 +41,7 @@ export default function AdminDashboard() {
   const [alertas, setAlertas] = useState<any[]>([])
   const [ultimosComandos, setUltimosComandos] = useState<any[]>([])
   const [mqttConnected, setMqttConnected] = useState<boolean | null>(null)
+  const [heartbeats, setHeartbeats] = useState<Record<string, any>>({})
   const evtSource = useRef<EventSource | null>(null)
 
   useEffect(() => {
@@ -22,8 +55,21 @@ export default function AdminDashboard() {
     evtSource.current.onmessage = (e) => {
       try { setPista(JSON.parse(e.data)) } catch {}
     }
-    return () => evtSource.current?.close()
+
+    const hbInterval = setInterval(async () => {
+      try {
+        const data = await MonitoramentoAPI.heartbeat()
+        setHeartbeats(data)
+      } catch {}
+    }, 10000)
+
+    return () => {
+      evtSource.current?.close()
+      clearInterval(hbInterval)
+    }
   }, [])
+
+  const hbEntries = Object.entries(heartbeats)
 
   const cards = [
     { label: 'Agendamentos Hoje', value: dashboard?.agendamentos_dia ?? '...', icon: Calendar, color: 'bg-neon-500/10 text-neon-400' },
@@ -116,6 +162,91 @@ export default function AdminDashboard() {
                 Próximo: {new Date(pista.proximo_agendamento).toLocaleString('pt-BR')}
               </p>
             )}
+
+            {hbEntries.length > 0 && <hr className="border-dark-700" />}
+
+            {hbEntries.map(([name, hb]) => (
+              <div key={name} className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-200">{hb.device?.nome || name}</span>
+                  <span className="text-xs text-gray-500">{hb.timestamp ? timeSince(hb.timestamp) : ''}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Signal className="w-4 h-4 text-gray-500" />
+                    <WifiSignal quality={hb.wifi?.qualidade ?? 0} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {hb.mqtt?.status === 'Conectado' ? (
+                      <span className="flex items-center gap-1 text-green-400"><Wifi className="w-4 h-4" /> MQTT OK</span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-red-400"><WifiOff className="w-4 h-4" /> MQTT</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-gray-500" />
+                    <span className="text-gray-300">{formatUptime(hb.sistema?.uptime_segundos ?? 0)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <HardDrive className="w-4 h-4 text-gray-500" />
+                    <span className="text-gray-300" title={hb.firmware?.build_date || ''}>v{hb.firmware?.versao ?? '?'}</span>
+                  </div>
+                </div>
+
+                {hb.firmware?.build_date && (
+                  <div className="text-xs text-gray-500">
+                    Build: {hb.firmware.build_date}
+                  </div>
+                )}
+
+                {hb.firmware?.ota_channel && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="px-2 py-0.5 rounded bg-dark-800 text-gray-400 border border-dark-600">
+                      {hb.firmware.ota_channel}
+                    </span>
+                    {hb.firmware.ota_disponivel && (
+                      <span className="px-2 py-0.5 rounded bg-neon-500/10 text-neon-400 border border-neon-500/30">
+                        OTA disponível
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {hb.wifi && (
+                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                    <span>IP: {hb.wifi.ip || '-'}</span>
+                    <span>RSSI: {hb.wifi.rssi ?? '-'} dBm</span>
+                  </div>
+                )}
+
+                {hb.balizamento && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-sm">
+                      <div className={`w-2 h-2 rounded-full ${hb.balizamento.status === 'Ativo' ? 'bg-green-500' : 'bg-gray-500'}`} />
+                      <span className="text-gray-300">{hb.balizamento.status === 'Ativo' ? 'Ativo' : 'Inativo'}</span>
+                      <span className="text-gray-500 text-xs">
+                        {hb.balizamento.contador_acionamentos ?? 0} acionamentos
+                        {hb.balizamento.tempo_ligado_segundos > 0 && ` / ${formatUptime(hb.balizamento.tempo_ligado_segundos)} ligado`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {hb.balizamento.modo_manual ? (
+                        <>
+                          <Settings className="w-4 h-4 text-yellow-400" />
+                          <span className="text-yellow-400 font-medium">Manual</span>
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4 text-neon-400" />
+                          <span className="text-neon-400 font-medium">Automático</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -140,52 +271,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-white mb-4">Sinal de Recebimento / Acionamento</h3>
-          <div className="space-y-3">
-            <div className="flex items-center gap-4 p-4 bg-dark-800 rounded-lg">
-              <div className={`p-3 rounded-full ${mqttConnected ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-                {mqttConnected ? (
-                  <CheckCircle className="w-8 h-8 text-green-400" />
-                ) : (
-                  <XCircle className="w-8 h-8 text-red-400" />
-                )}
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-200">
-                  {mqttConnected ? 'Broker MQTT conectado' : 'Broker MQTT desconectado'}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {pista?.status === 'ligado'
-                    ? 'Comando recebido pelo balizador'
-                    : pista?.status === 'ligando'
-                    ? 'Aguardando confirmação do balizador...'
-                    : pista?.ultimo_confirmado === true
-                    ? 'Último comando foi confirmado'
-                    : pista?.ultimo_confirmado === false
-                    ? 'Último comando falhou - verifique alertas'
-                    : 'Nenhum comando enviado'}
-                </p>
-              </div>
-            </div>
-            {pista?.comando_confirmado !== undefined && (
-              <div className={`flex items-center gap-3 p-3 rounded-lg border text-sm ${pista.comando_confirmado ? 'bg-green-500/5 border-green-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
-                {pista.comando_confirmado ? (
-                  <CheckCircle className="w-5 h-5 text-green-400" />
-                ) : (
-                  <XCircle className="w-5 h-5 text-red-400" />
-                )}
-                <span className={pista.comando_confirmado ? 'text-green-300' : 'text-red-300'}>
-                  {pista.comando_confirmado
-                    ? 'Balizador acionado - sinal OK'
-                    : 'Balizador sem resposta'}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-
+      <div className="mt-8">
         <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold text-white mb-4">Acesso Rápido</h3>
           <div className="grid grid-cols-2 gap-3">

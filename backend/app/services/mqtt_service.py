@@ -5,11 +5,15 @@ from datetime import datetime
 from typing import Optional
 import paho.mqtt.client as mqtt
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
 
 from app.core.database import async_session_factory
 from app.services.configuracao_service import ConfiguracaoService
 from app.models.alerta import Alerta
 from app.models.log import Log
+from app.models.agendamento import Agendamento, StatusAgendamento
+from app.models.acionamento import Acionamento
+from app.models.aeroclube import Aeroclube
 from app.core.timezone import agora_sp
 
 
@@ -20,6 +24,14 @@ class MqttService:
         self._lock = threading.Lock()
         self._pending_commands: dict[str, asyncio.Event] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._heartbeat_cache: dict[str, dict] = {}
+        self._heartbeat_client: Optional[mqtt.Client] = None
+        self._heartbeat_listener_running = False
+        self._lock_heartbeat = threading.Lock()
+
+        self._bal_read_client: Optional[mqtt.Client] = None
+        self._bal_read_listener_running = False
+        self._lock_bal_read = threading.Lock()
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
@@ -37,7 +49,7 @@ class MqttService:
                 "port": int(await svc.obter("mqtt_broker_port", "1883")),
                 "username": await svc.obter("mqtt_username", ""),
                 "password": await svc.obter("mqtt_password", ""),
-                "topic_prefix": await svc.obter("mqtt_topic_prefix", "aeroclube"),
+                "topic_prefix": await svc.obter("mqtt_topic_prefix", "Bal"),
                 "timeout": int(await svc.obter("mqtt_timeout_segundos", "10")),
             }
 
@@ -221,6 +233,7 @@ class MqttService:
             log = Log(
                 acao="publicar",
                 entidade="mqtt_comando",
+                entidade_id=agendamento_info.get("id") if agendamento_info else aeroclube_id,
                 descricao=f"Comando {comando} -> {topic} {'OK' if ok else 'FALHA'}",
                 detalhes={
                     "topic": topic,
@@ -258,6 +271,60 @@ class MqttService:
             traceback.print_exc()
             return False
 
+
+    async def enviar_agendamento(self, aeroclube_id: int, aeroclube_nome: str, agendamento_data: dict) -> bool:
+        """Envia dados completos do agendamento para a estacao via MQTT"""
+        config = await self.obter_config()
+        prefixo = config["topic_prefix"]
+        topic = f"{prefixo}/Write/{aeroclube_nome}"
+        payload_dict = {"comando": "AgendarBalizamento", "agendamento": agendamento_data}
+        payload_str = json.dumps(payload_dict, ensure_ascii=False)
+
+        def _envio(client):
+            client.publish(topic, payload_str, qos=1)
+            print(f"[MQTT] Agendamento enviado para {topic}")
+            return True
+
+        return await self._executar_com_mqtt(_envio, response_timeout=5)
+
+    async def enviar_cancelamento_agendamento(self, aeroclube_id: int, aeroclube_nome: str, agendamento_id: int) -> bool:
+        """Envia cancelamento de agendamento para a estacao"""
+        config = await self.obter_config()
+        prefixo = config["topic_prefix"]
+        topic = f"{prefixo}/Write/{aeroclube_nome}"
+        payload_dict = {"comando": "CancelarAgendamento", "agendamento": {"id": agendamento_id}}
+        payload_str = json.dumps(payload_dict, ensure_ascii=False)
+
+        def _envio(client):
+            client.publish(topic, payload_str, qos=1)
+            print(f"[MQTT] Cancelamento de agendamento {agendamento_id} enviado para {topic}")
+            return True
+
+        return await self._executar_com_mqtt(_envio, response_timeout=5)
+
+    async def request_heartbeat(self, aeroclube_id: int, aeroclube_nome: str, timeout: int = 10) -> Optional[dict]:
+        """Solicita heartbeat da estacao e retorna o JSON de resposta"""
+        config = await self.obter_config()
+        topic = f"{config['topic_prefix']}/Write/{aeroclube_nome}"
+        response_topic = f"Heartbeat/{aeroclube_nome}"
+        payload_str = json.dumps({"comando": "RequestHeartbeat"})
+
+        def _envio(client):
+            client.publish(topic, payload_str, qos=1)
+            print(f"[MQTT] Solicitando heartbeat em {topic}")
+            return True
+
+        # Subscribe to Heartbeat topic to catch the response
+        ok = await self._executar_com_mqtt(_envio, subscribe_topic=response_topic, response_timeout=timeout)
+
+        resposta = None
+        if ok and self._ultima_resposta:
+            try:
+                resposta = json.loads(self._ultima_resposta)
+            except json.JSONDecodeError:
+                pass
+
+        return resposta
 
     async def ler_energia(self, aeroclube_nome: str) -> Optional[dict]:
         self._ultima_resposta = None
@@ -321,6 +388,230 @@ class MqttService:
             print(f"[MQTT] ERRO ao salvar log/alerta energia: {e}")
 
         return resposta
+
+
+    async def start_heartbeat_listener(self):
+        if self._heartbeat_listener_running:
+            return
+        config = await self.obter_config()
+        host = config["host"]
+        port = config["port"]
+        username = config["username"]
+        password = config["password"]
+        if not host:
+            print("[MQTT Heartbeat] Broker não configurado")
+            return
+
+        def _on_connect_hb(c, u, f, rc):
+            if rc == 0:
+                c.subscribe("Heartbeat/+", qos=1)
+                print("[MQTT Heartbeat] Conectado e inscrito em Heartbeat/+")
+            else:
+                print(f"[MQTT Heartbeat] Falha conexão: rc={rc}")
+
+        def _on_message_hb(c, u, msg):
+            try:
+                payload = json.loads(msg.payload.decode())
+                station_name = msg.topic.split("/", 1)[1] if "/" in msg.topic else msg.topic
+                with self._lock_heartbeat:
+                    self._heartbeat_cache[station_name] = payload
+                print(f"[MQTT Heartbeat] Cache atualizado para {station_name}")
+            except Exception as e:
+                print(f"[MQTT Heartbeat] Erro processando {msg.topic}: {e}")
+
+        with self._lock:
+            if self._heartbeat_client:
+                try:
+                    self._heartbeat_client.loop_stop()
+                    self._heartbeat_client.disconnect()
+                except Exception:
+                    pass
+            self._heartbeat_client = mqtt.Client()
+            self._heartbeat_client.on_connect = _on_connect_hb
+            self._heartbeat_client.on_message = _on_message_hb
+            if username:
+                self._heartbeat_client.username_pw_set(username, password)
+            try:
+                self._heartbeat_client.connect_async(host, port, 60)
+                self._heartbeat_client.loop_start()
+                self._heartbeat_listener_running = True
+                print(f"[MQTT Heartbeat] Listener iniciado em {host}:{port}")
+            except Exception as e:
+                print(f"[MQTT Heartbeat] Erro ao iniciar: {e}")
+
+    def stop_heartbeat_listener(self):
+        with self._lock:
+            if self._heartbeat_client:
+                try:
+                    self._heartbeat_client.loop_stop()
+                    self._heartbeat_client.disconnect()
+                except Exception:
+                    pass
+                self._heartbeat_client = None
+            self._heartbeat_listener_running = False
+            print("[MQTT Heartbeat] Listener parado")
+
+    def get_cached_heartbeat(self, station_name: str) -> Optional[dict]:
+        with self._lock_heartbeat:
+            return self._heartbeat_cache.get(station_name)
+
+    def get_all_cached_heartbeats(self) -> dict[str, dict]:
+        with self._lock_heartbeat:
+            return dict(self._heartbeat_cache)
+
+    async def _process_bal_read_message(self, topic: str, payload: dict):
+        try:
+            station_name = topic.split("/", 2)[2] if topic.count("/") >= 2 else topic.split("/", 1)[1]
+            comando = payload.get("comando")
+            ag = payload.get("agendamento", {})
+            ag_id = ag.get("id")
+            print(f"[MQTT BalRead] {comando} id={ag_id} estacao={station_name}")
+
+            if not comando or not ag_id:
+                return
+
+            async with async_session_factory() as session:
+                if comando == "AgendamentoConfirmado":
+                    await session.execute(
+                        update(Agendamento)
+                        .where(Agendamento.id == ag_id)
+                        .values(status=StatusAgendamento.CONFIRMADO, updated_at=agora_sp())
+                    )
+                    await session.commit()
+                    print(f"[MQTT BalRead] Agendamento {ag_id} confirmado")
+
+                elif comando == "AgendamentoAndamento":
+                    now = agora_sp()
+                    result = await session.execute(
+                        select(Acionamento).where(Acionamento.agendamento_id == ag_id)
+                    )
+                    acionamento = result.scalar_one_or_none()
+                    if not acionamento:
+                        acionamento = Acionamento(
+                            agendamento_id=ag_id,
+                            data_hora_ligamento=now,
+                            status="ligado",
+                            confirmado=True,
+                        )
+                        session.add(acionamento)
+                    else:
+                        acionamento.status = "ligado"
+                        acionamento.confirmado = True
+
+                    await session.execute(
+                        update(Agendamento)
+                        .where(Agendamento.id == ag_id)
+                        .values(status=StatusAgendamento.EM_ANDAMENTO, updated_at=now)
+                    )
+                    await session.commit()
+                    print(f"[MQTT BalRead] Agendamento {ag_id} em andamento")
+
+                elif comando == "AgendamentoFinalizado":
+                    now = agora_sp()
+                    result = await session.execute(
+                        select(Acionamento).where(Acionamento.agendamento_id == ag_id)
+                    )
+                    acionamento = result.scalar_one_or_none()
+                    if acionamento and not acionamento.data_hora_desligamento:
+                        acionamento.data_hora_desligamento = now
+                        acionamento.data_hora_ligamento = acionamento.data_hora_ligamento or now
+                        acionamento.tempo_ligado_segundos = (
+                            now - acionamento.data_hora_ligamento
+                        ).total_seconds()
+                        acionamento.status = "desligado"
+
+                    await session.execute(
+                        update(Agendamento)
+                        .where(Agendamento.id == ag_id)
+                        .values(status=StatusAgendamento.CONCLUIDO, updated_at=now)
+                    )
+                    await session.commit()
+                    print(f"[MQTT BalRead] Agendamento {ag_id} finalizado")
+
+                elif comando == "ConsumoBalizamento":
+                    now = agora_sp()
+                    result = await session.execute(
+                        select(Acionamento).where(Acionamento.agendamento_id == ag_id)
+                    )
+                    acionamento = result.scalar_one_or_none()
+                    if acionamento:
+                        consumo = payload.get("consumo_kwh", 0)
+                        duracao = payload.get("duracao_segundos", 0)
+                        if not acionamento.data_hora_desligamento:
+                            acionamento.data_hora_desligamento = now
+                        acionamento.tempo_ligado_segundos = duracao or (
+                            now - acionamento.data_hora_ligamento
+                        ).total_seconds()
+                        acionamento.status = "desligado"
+                        acionamento.confirmado = True
+                        await session.commit()
+                        print(f"[MQTT BalRead] Consumo agendamento {ag_id}: {consumo}kWh")
+        except Exception as e:
+            print(f"[MQTT BalRead] Erro processando {topic}: {type(e).__name__}: {e}")
+
+    async def start_bal_read_listener(self):
+        if self._bal_read_listener_running:
+            return
+        config = await self.obter_config()
+        host = config["host"]
+        port = config["port"]
+        username = config["username"]
+        password = config["password"]
+        prefixo = config["topic_prefix"]
+        if not host:
+            print("[MQTT BalRead] Broker nao configurado")
+            return
+
+        subscribe_topic = f"{prefixo}/Read/+"
+
+        def _on_connect_br(c, u, f, rc):
+            if rc == 0:
+                c.subscribe(subscribe_topic, qos=1)
+                print(f"[MQTT BalRead] Conectado e inscrito em {subscribe_topic}")
+            else:
+                print(f"[MQTT BalRead] Falha conexao: rc={rc}")
+
+        def _on_message_br(c, u, msg):
+            try:
+                payload = json.loads(msg.payload.decode())
+                loop = self._get_loop()
+                asyncio.run_coroutine_threadsafe(
+                    self._process_bal_read_message(msg.topic, payload), loop
+                )
+            except Exception as e:
+                print(f"[MQTT BalRead] Erro no callback: {e}")
+
+        with self._lock_bal_read:
+            if self._bal_read_client:
+                try:
+                    self._bal_read_client.loop_stop()
+                    self._bal_read_client.disconnect()
+                except Exception:
+                    pass
+            self._bal_read_client = mqtt.Client()
+            self._bal_read_client.on_connect = _on_connect_br
+            self._bal_read_client.on_message = _on_message_br
+            if username:
+                self._bal_read_client.username_pw_set(username, password)
+            try:
+                self._bal_read_client.connect_async(host, port, 60)
+                self._bal_read_client.loop_start()
+                self._bal_read_listener_running = True
+                print(f"[MQTT BalRead] Listener iniciado em {host}:{port} -> {subscribe_topic}")
+            except Exception as e:
+                print(f"[MQTT BalRead] Erro ao iniciar: {e}")
+
+    def stop_bal_read_listener(self):
+        with self._lock_bal_read:
+            if self._bal_read_client:
+                try:
+                    self._bal_read_client.loop_stop()
+                    self._bal_read_client.disconnect()
+                except Exception:
+                    pass
+                self._bal_read_client = None
+            self._bal_read_listener_running = False
+            print("[MQTT BalRead] Listener parado")
 
 
 mqtt_service = MqttService()

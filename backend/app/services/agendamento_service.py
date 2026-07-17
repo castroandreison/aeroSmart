@@ -119,7 +119,7 @@ class AgendamentoService:
         # Force load lazy relationships for async safety
         agendamento = (await self.session.execute(
             select(Agendamento)
-            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave))
+            .options(selectinload(Agendamento.solicitante).selectinload(Usuario.aeroclube_rel), selectinload(Agendamento.aeronave))
             .where(Agendamento.id == agendamento.id)
         )).scalar_one()
         return agendamento

@@ -33,6 +33,7 @@ static const char *TAG = "balizamento";
 #define RELAY_PIN        GPIO_NUM_2
 #define MANUAL_PIN       GPIO_NUM_4
 #define MAX_HISTORY      10
+#define MAX_SCHEDULES    20
 #define NVS_NAMESPACE    "balizamento"
 
 #ifndef TUYA_PRODUCT_ID
@@ -59,10 +60,10 @@ static std::string g_tuya_reg = TUYA_REGION;
 
 // Heartbeat / Firmware metadata
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "2.0.4"
+#define FIRMWARE_VERSION "2.0.5"
 #endif
 #ifndef FIRMWARE_BIN
-#define FIRMWARE_BIN "balizador_v2.0.4.bin"
+#define FIRMWARE_BIN "balizador_v2.0.5.bin"
 #endif
 #ifndef FIRMWARE_OTA_CHANNEL
 #define FIRMWARE_OTA_CHANNEL "stable"
@@ -181,6 +182,22 @@ th{color:#8892a4;font-size:11px;text-transform:uppercase}
 </table>
 </div>
 <div class="card">
+<h2>Agendamentos Futuros</h2>
+<table>
+<thead><tr><th>Inicio</th><th>Fim</th><th>Duracao</th><th>Status</th></tr></thead>
+<tbody id="schedulesBody"><tr><td colspan="4">Carregando...</td></tr></tbody>
+</table>
+</div>
+<div class="card">
+<h2>MQTT Log</h2>
+<div style="max-height:300px;overflow-y:auto;font-size:11px">
+<table>
+<thead><tr><th>Topico</th><th>Payload</th><th>Quando</th></tr></thead>
+<tbody id="mqttLogBody"><tr><td colspan="3" style="text-align:center;color:#5a6a7e">Aguardando...</td></tr></tbody>
+</table>
+</div>
+</div>
+<div class="card">
 <h2>Configuracoes</h2>
 <div style="display:flex;gap:4px;margin-bottom:12px">
 <button class="btn-primary" style="flex:1;font-size:13px;padding:6px" onclick="showTab('rede')">Rede</button>
@@ -295,6 +312,23 @@ async function fetchHistory(){
     tbody.appendChild(tr);
   }
 }
+async function fetchSchedules(){
+  const d=await fetchJSON('/api/schedules');
+  if(!d)return;
+  const tbody=document.getElementById('schedulesBody');
+  tbody.innerHTML='';
+  if(!d.schedules||d.schedules.length===0){
+    tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#5a6a7e">Nenhum agendamento futuro</td></tr>';
+    return;
+  }
+  for(const s of d.schedules){
+    const tr=document.createElement('tr');
+    const status=s.executed?'Em Andamento':'Pendente';
+    const sc=s.executed?'badge-on':'badge-warn';
+    tr.innerHTML='<td>'+s.start+'</td><td>'+s.end+'</td><td>'+fmtTime(s.duration_sec)+'</td><td><span class="badge '+sc+'" style="font-size:11px;padding:2px 8px">'+status+'</span></td>';
+    tbody.appendChild(tr);
+  }
+}
 async function sendCmd(action){
   const dur=document.getElementById('durationInput').value;
   const body={action:action};
@@ -371,8 +405,8 @@ async function saveConfig(){
     alert('Erro ao salvar configuracoes.');
   }
 }
-fetchStatus();fetchHistory();loadConfig();
-setInterval(fetchStatus,1000);setInterval(fetchHistory,10000);
+fetchStatus();fetchHistory();fetchSchedules();loadConfig();
+setInterval(fetchStatus,1000);setInterval(fetchHistory,10000);setInterval(fetchSchedules,10000);
 </script>
 </body>
 </html>
@@ -384,6 +418,14 @@ struct HistoryEntry {
   float energy_kwh;
   bool completed;
   bool has_energy;
+};
+
+struct ScheduledEvent {
+  uint32_t id;
+  uint32_t start_timestamp;
+  uint32_t end_timestamp;
+  uint32_t duration_sec;
+  bool executed;
 };
 
 struct SavedConfig {
@@ -459,6 +501,8 @@ class BalizamentoController : public esphome::Component {
   unsigned long last_tuya_reconnect_ = 0;
   nvs_handle_t nvs_handle_;
   std::vector<HistoryEntry> history_;
+  std::vector<ScheduledEvent> schedule_queue_;
+  unsigned long last_schedule_check_ms_ = 0;
   SavedConfig saved_config_;
 
   std::string bal_read_topic_;
@@ -483,6 +527,13 @@ class BalizamentoController : public esphome::Component {
   void loadHistory();
   void saveHistory();
   void addHistory(uint32_t dur, float energy, bool completed, bool has_energy);
+
+  void loadSchedules();
+  void saveSchedules();
+  void checkSchedules();
+  void cleanupSchedules();
+  static time_t parseScheduleDateTime(const char *date, const char *time_str);
+  void publishScheduleStatus(uint32_t id, const char *comando, const char *status);
 
   // Heartbeat tracking
   int mqtt_published_count_ = 0;
@@ -527,6 +578,7 @@ class BalizamentoController : public esphome::Component {
   static esp_err_t handleApiRestart(httpd_req_t *req);
   static esp_err_t handleApiConfig(httpd_req_t *req);
   static esp_err_t handleApiScan(httpd_req_t *req);
+  static esp_err_t handleApiSchedules(httpd_req_t *req);
 };
 
 BalizamentoController *g_controller = nullptr;
@@ -601,11 +653,29 @@ void BalizamentoController::setup() {
   gpio_set_pull_mode(MANUAL_PIN, GPIO_PULLDOWN_ONLY);
 
   loadHistory();
+  loadSchedules();
   loadSavedConfig();
   buildTopics();
-  // Aplicar timezone
-  if (strlen(saved_config_.timezone) > 0) {
-    setenv("TZ", saved_config_.timezone, 1);
+  // Aplicar timezone (formato POSIX, necessario para mktime)
+  {
+    int off_h = 3; // default BRT (UTC-3)
+    const char *tz = saved_config_.timezone;
+    if (strlen(tz) > 0) {
+      int h = 0;
+      if (sscanf(tz, "%d", &h) == 1 && h >= -12 && h <= 12) {
+        off_h = -h;
+      } else if (strstr(tz, "Noronha") || strcmp(tz, "-02") == 0) {
+        off_h = 2;
+      } else if (strstr(tz, "Manaus") || strstr(tz, "Boa_Vista") || strstr(tz, "Cuiaba") ||
+                 strstr(tz, "Campo_Grande") || strstr(tz, "Porto_Velho") || strcmp(tz, "-04") == 0) {
+        off_h = 4;
+      } else if (strstr(tz, "Rio_Branco") || strcmp(tz, "-05") == 0) {
+        off_h = 5;
+      }
+    }
+    char tz_buf[32];
+    snprintf(tz_buf, sizeof(tz_buf), "BRT%d", off_h);
+    setenv("TZ", tz_buf, 1);
     tzset();
   }
   ap_started_ = true; // AP gerenciado pelo YAML
@@ -646,6 +716,13 @@ void BalizamentoController::setup() {
 void BalizamentoController::loop() {
   checkTimer();
   checkTuya();
+
+  // Check schedules every 2 seconds
+  unsigned long now_ms = (unsigned long)(esp_timer_get_time() / 1000);
+  if (now_ms - last_schedule_check_ms_ >= 2000) {
+    last_schedule_check_ms_ = now_ms;
+    checkSchedules();
+  }
 
   // Detect MQTT connection state changes
   bool mqtt_now = esphome::mqtt::global_mqtt_client &&
@@ -688,6 +765,7 @@ void BalizamentoController::initWebServer() {
       {"/api/config",    HTTP_GET,  handleApiConfig,    NULL},
       {"/api/config",    HTTP_POST, handleApiConfig,    NULL},
       {"/api/scan",      HTTP_GET,  handleApiScan,       NULL},
+      {"/api/schedules", HTTP_GET,  handleApiSchedules,  NULL},
     };
     for (auto &u : uris) httpd_register_uri_handler(server_, &u);
     ESP_LOGI(TAG, "Web server iniciado na porta 80");
@@ -986,6 +1064,31 @@ esp_err_t BalizamentoController::handleApiScan(httpd_req_t *req) {
   return ESP_OK;
 }
 
+esp_err_t BalizamentoController::handleApiSchedules(httpd_req_t *req) {
+  if (!g_controller) { httpd_resp_send_404(req); return ESP_FAIL; }
+  auto &c = *g_controller;
+
+  StaticJsonDocument<4096> doc;
+  JsonArray arr = doc.createNestedArray("schedules");
+  for (const auto &s : c.schedule_queue_) {
+    JsonObject o = arr.createNestedObject();
+    o["id"] = s.id;
+    o["start_timestamp"] = s.start_timestamp;
+    o["end_timestamp"] = s.end_timestamp;
+    o["duration_sec"] = s.duration_sec;
+    o["executed"] = s.executed;
+    if (s.start_timestamp >= 100000) o["start"] = fmtDate(s.start_timestamp) + " " + fmtTime(s.start_timestamp);
+    if (s.end_timestamp >= 100000) o["end"] = fmtDate(s.end_timestamp) + " " + fmtTime(s.end_timestamp);
+  }
+  doc["count"] = c.schedule_queue_.size();
+
+  std::string out;
+  serializeJson(doc, out);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
 // ==================== TIMER ====================
 void BalizamentoController::checkTimer() {
   if (!timer_active_) return;
@@ -1059,6 +1162,62 @@ void BalizamentoController::handleBalCommand(const std::string &payload, float e
     finishActivation(false);
     } else if (cmd == "RequestHeartbeat") {
       publishHeartbeat();
+    } else if (cmd == "AgendarBalizamento") {
+      if (doc.containsKey("agendamento")) {
+        JsonObject ag = doc["agendamento"];
+        const char *data_str = ag["data"];
+        const char *hora_inicio = ag["hora_inicio"];
+        const char *hora_fim = ag["hora_fim"];
+        uint32_t dur = ag["duracao_segundos"] | 0;
+        uint32_t sched_id = ag["id"] | 0;
+        if (data_str && hora_inicio && hora_fim && sched_id > 0) {
+          time_t start_ts = parseScheduleDateTime(data_str, hora_inicio);
+          time_t end_ts = parseScheduleDateTime(data_str, hora_fim);
+          ESP_LOGI(TAG, "Agendar: id=%u start_ts=%lld end_ts=%lld now=%lld", sched_id, (long long)start_ts, (long long)end_ts, (long long)::time(nullptr));
+          if (start_ts > 0 && end_ts > start_ts && end_ts > ::time(nullptr)) {
+            bool found = false;
+            for (auto &s : schedule_queue_) {
+              if (s.id == sched_id) {
+                s.start_timestamp = (uint32_t)start_ts;
+                s.end_timestamp = (uint32_t)end_ts;
+                s.duration_sec = dur;
+                s.executed = false;
+                found = true;
+                break;
+              }
+            }
+            if (!found && schedule_queue_.size() < MAX_SCHEDULES) {
+              ScheduledEvent se;
+              se.id = sched_id;
+              se.start_timestamp = (uint32_t)start_ts;
+              se.end_timestamp = (uint32_t)end_ts;
+              se.duration_sec = dur;
+              se.executed = false;
+              schedule_queue_.push_back(se);
+            }
+            if (found || (!found && schedule_queue_.size() < MAX_SCHEDULES)) {
+              saveSchedules();
+              ESP_LOGI(TAG, "Agendamento %u agendado: inicio=%u, fim=%u, duracao=%us", sched_id, (uint32_t)start_ts, (uint32_t)end_ts, dur);
+              publishScheduleStatus(sched_id, "AgendamentoConfirmado", "agendado");
+            }
+          }
+        }
+      }
+    } else if (cmd == "CancelarAgendamento") {
+      uint32_t cancel_id = doc["agendamento"]["id"] | 0;
+      if (cancel_id > 0) {
+        for (auto it = schedule_queue_.begin(); it != schedule_queue_.end(); ++it) {
+          if (it->id == cancel_id) {
+            if (it->executed && relay_on_) {
+              finishActivation(false);
+            }
+            schedule_queue_.erase(it);
+            saveSchedules();
+            ESP_LOGI(TAG, "Agendamento %u removido", cancel_id);
+            break;
+          }
+        }
+      }
     } else if (cmd == "UpdateFirmware") {
     const char *url = doc["url"];
     if (url && strlen(url) > 5) {
@@ -1103,6 +1262,21 @@ void BalizamentoController::publishConsumption(float diff_kwh, unsigned long dur
   doc["duracao_segundos"] = dur_sec;
   doc["duracao_minutos"] = dur_sec / 60.0;
   doc["timestamp"] = fmtTimestamp(::time(nullptr));
+  std::string out;
+  serializeJson(doc, out);
+  mqtt_published_count_++;
+  ESP_LOGI(TAG, "MQTT ENVIO [%s]: %s", bal_read_topic_.c_str(), out.c_str());
+  esphome::mqtt::global_mqtt_client->publish(bal_read_topic_, out);
+}
+
+void BalizamentoController::publishScheduleStatus(uint32_t id, const char *comando, const char *status) {
+  if (!esphome::mqtt::global_mqtt_client) return;
+  StaticJsonDocument<256> doc;
+  doc["comando"] = comando;
+  JsonObject ag = doc.createNestedObject("agendamento");
+  ag["id"] = id;
+  ag["status"] = status;
+  ag["data_hora"] = fmtTimestamp(::time(nullptr));
   std::string out;
   serializeJson(doc, out);
   mqtt_published_count_++;
@@ -1396,6 +1570,101 @@ void BalizamentoController::saveHistory() {
   }
   nvs_commit(nvs_handle_);
   nvs_close(nvs_handle_);
+}
+
+// ==================== AGENDA ====================
+time_t BalizamentoController::parseScheduleDateTime(const char *date, const char *time_str) {
+  struct tm tm = {};
+  int d, m, y, h, min, s = 0;
+  if (sscanf(date, "%d/%d/%d", &d, &m, &y) != 3) return 0;
+  if (sscanf(time_str, "%d:%d:%d", &h, &min, &s) < 2) return 0;
+  tm.tm_mday = d;
+  tm.tm_mon = m - 1;
+  tm.tm_year = y - 1900;
+  tm.tm_hour = h;
+  tm.tm_min = min;
+  tm.tm_sec = s;
+  tm.tm_isdst = -1;
+  time_t result = mktime(&tm);
+  ESP_LOGI(TAG, "parseScheduleDateTime: data=%s hora=%s -> %lld", date, time_str, (long long)result);
+  return result;
+}
+
+void BalizamentoController::loadSchedules() {
+  schedule_queue_.clear();
+  nvs_handle_t h;
+  if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+  int32_t count = 0;
+  nvs_get_i32(h, "sched_count", &count);
+  if (count > MAX_SCHEDULES) count = MAX_SCHEDULES;
+  for (int32_t i = 0; i < count; i++) {
+    char key[16]; snprintf(key, sizeof(key), "sched_%ld", (long)i);
+    size_t sz = 0;
+    if (nvs_get_blob(h, key, NULL, &sz) != ESP_OK || sz != sizeof(ScheduledEvent)) continue;
+    ScheduledEvent e;
+    if (nvs_get_blob(h, key, &e, &sz) == ESP_OK) {
+      schedule_queue_.push_back(e);
+    }
+  }
+  nvs_close(h);
+  cleanupSchedules();
+  ESP_LOGI(TAG, "Agenda: %d eventos", schedule_queue_.size());
+}
+
+void BalizamentoController::saveSchedules() {
+  nvs_handle_t h;
+  if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+  int32_t count = (int32_t)schedule_queue_.size();
+  nvs_set_i32(h, "sched_count", count);
+  for (int32_t i = 0; i < count && i < MAX_SCHEDULES; i++) {
+    char key[16]; snprintf(key, sizeof(key), "sched_%ld", (long)i);
+    nvs_set_blob(h, key, &schedule_queue_[i], sizeof(ScheduledEvent));
+  }
+  nvs_commit(h);
+  nvs_close(h);
+}
+
+void BalizamentoController::cleanupSchedules() {
+  time_t now = ::time(nullptr);
+  bool changed = false;
+  for (auto it = schedule_queue_.begin(); it != schedule_queue_.end(); ) {
+    if ((time_t)it->end_timestamp < now) {
+      it = schedule_queue_.erase(it);
+      changed = true;
+    } else {
+      ++it;
+    }
+  }
+  if (changed) saveSchedules();
+}
+
+void BalizamentoController::checkSchedules() {
+  time_t now = ::time(nullptr);
+  if (now < 100000) return;
+
+  for (auto &s : schedule_queue_) {
+    if (!s.executed && now >= (time_t)s.start_timestamp && now < (time_t)s.end_timestamp) {
+      if (!relay_on_) {
+        ESP_LOGI(TAG, "Agenda %u: iniciando", s.id);
+        StaticJsonDocument<256> json_cmd;
+        json_cmd["comando"] = "BalOn";
+        JsonObject ag = json_cmd.createNestedObject("agendamento");
+        ag["duracao_minutos"] = s.duration_sec / 60.0;
+        std::string payload;
+        serializeJson(json_cmd, payload);
+        handleBalCommand(payload, current_energy_);
+      }
+      s.executed = true;
+      saveSchedules();
+      publishScheduleStatus(s.id, "AgendamentoAndamento", "em_andamento");
+    }
+    if (s.executed && now >= (time_t)s.end_timestamp && relay_on_) {
+      ESP_LOGI(TAG, "Agenda %u: finalizando", s.id);
+      finishActivation(true);
+      publishScheduleStatus(s.id, "AgendamentoFinalizado", "finalizado");
+    }
+  }
+  cleanupSchedules();
 }
 
 void BalizamentoController::addHistory(uint32_t dur, float energy, bool completed, bool has_energy) {

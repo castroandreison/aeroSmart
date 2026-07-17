@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 from typing import List, Optional
 from datetime import date
 
@@ -10,8 +12,50 @@ from app.models.agendamento import Agendamento
 from app.schemas.agendamento import AgendamentoCreate, AgendamentoUpdate, AgendamentoResponse
 from app.services.agendamento_service import AgendamentoService
 from app.services.usuario_service import UsuarioService
+from app.services.mqtt_service import mqtt_service
 
 router = APIRouter(prefix="/agendamentos", tags=["Agendamentos"])
+
+
+async def _aeroclube_do_ag(ag: Agendamento) -> tuple:
+    """Extrai (id, nome) do aeroclube do agendamento (relacao ja carregada)"""
+    if ag and ag.solicitante and ag.solicitante.aeroclube_rel:
+        return ag.solicitante.aeroclube_rel.id, ag.solicitante.aeroclube_rel.nome
+    return None, None
+
+
+async def _publicar_agendamento_mqtt(ag: Agendamento):
+    """Envia dados do agendamento para a estacao via MQTT"""
+    aero_id, aero_nome = await _aeroclube_do_ag(ag)
+    if not aero_id or not aero_nome:
+        print(f"[agendamentos] Agendamento {ag.id}: aeroclube nao encontrado, pulando MQTT")
+        return
+    duracao_segundos = int((ag.hora_termino - ag.hora_inicio).total_seconds())
+    ag_data = {
+        "id": ag.id,
+        "data": ag.hora_inicio.strftime("%d/%m/%Y"),
+        "hora_inicio": ag.hora_inicio.strftime("%H:%M:%S"),
+        "hora_fim": ag.hora_termino.strftime("%H:%M:%S"),
+        "duracao_segundos": duracao_segundos,
+    }
+    print(f"[agendamentos] Publicando agendamento {ag.id} via MQTT para {aero_nome}: {ag_data}")
+    try:
+        ok = await mqtt_service.enviar_agendamento(aero_id, aero_nome, ag_data)
+        print(f"[agendamentos] MQTT publicacao agendamento {ag.id}: {'OK' if ok else 'FALHA'}")
+    except Exception as e:
+        print(f"[agendamentos] Erro ao publicar agendamento {ag.id} via MQTT: {e}")
+
+
+async def _cancelar_agendamento_mqtt(ag: Agendamento):
+    """Envia cancelamento do agendamento para a estacao via MQTT"""
+    aero_id, aero_nome = await _aeroclube_do_ag(ag)
+    if not aero_id or not aero_nome:
+        return
+    print(f"[agendamentos] Cancelando agendamento {ag.id} via MQTT para {aero_nome}")
+    try:
+        await mqtt_service.enviar_cancelamento_agendamento(aero_id, aero_nome, ag.id)
+    except Exception as e:
+        print(f"[agendamentos] Erro ao cancelar agendamento {ag.id} via MQTT: {e}")
 
 
 @router.get("/", response_model=List[AgendamentoResponse])
@@ -106,6 +150,10 @@ async def criar_agendamento(
             ip=request.client.host if request.client else None,
         )
         dif = (agendamento.hora_termino - agendamento.hora_inicio).total_seconds() / 60 if agendamento.hora_inicio and agendamento.hora_termino else None
+
+        # Publica agendamento via MQTT para a estacao
+        await _publicar_agendamento_mqtt(agendamento)
+
         return AgendamentoResponse(
             id=agendamento.id,
             data=agendamento.data,
@@ -138,6 +186,10 @@ async def atualizar_agendamento(
         if not agendamento:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado")
         dif = (agendamento.hora_termino - agendamento.hora_inicio).total_seconds() / 60 if agendamento.hora_inicio and agendamento.hora_termino else None
+
+        # Publica atualizacao do agendamento via MQTT
+        await _publicar_agendamento_mqtt(agendamento)
+
         return AgendamentoResponse(
             id=agendamento.id,
             data=agendamento.data,
@@ -165,9 +217,15 @@ async def excluir_agendamento(
 ):
     service = AgendamentoService(session)
     try:
+        # Carrega agendamento com relacoes antes de excluir
+        ag_del = await service.obter_por_id(agendamento_id)
+        if ag_del:
+            await _cancelar_agendamento_mqtt(ag_del)
+
         success = await service.excluir(agendamento_id)
         if not success:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado")
+
         return {"message": "Agendamento excluído com sucesso"}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

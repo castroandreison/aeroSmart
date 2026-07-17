@@ -17,6 +17,7 @@ from app.schemas.monitoramento import StatusPista, DashboardAdmin, DashboardSoli
 from app.services.automacao_service import AutomacaoService
 from app.services.camera_service import CameraService
 from app.services.financeiro_service import FinanceiroService
+from app.services.mqtt_service import mqtt_service
 
 router = APIRouter(prefix="/monitoramento", tags=["Monitoramento"])
 
@@ -186,6 +187,13 @@ async def dashboard_proprietario(
         total_usuarios_ativos=tot_usuarios,
         aeroclubes=aeroclubes,
     )
+
+
+@router.get("/heartbeat")
+async def get_heartbeat(
+    current_user: Usuario = Depends(get_current_user),
+):
+    return mqtt_service.get_all_cached_heartbeats()
 
 
 @router.get("/camera/snapshot")

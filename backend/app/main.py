@@ -11,6 +11,7 @@ from app.models.aeroclube import Aeroclube
 from app.models.usuario import Usuario
 from app.models.agendamento import Agendamento, StatusAgendamento
 from app.services.automacao_service import AutomacaoService
+from app.services.mqtt_service import mqtt_service
 from sqlalchemy import select, text
 from app.api.v1 import auth, usuarios, aeronaves, agendamentos, configuracoes, financeiro, monitoramento, logs, automacao, relatorios, aeroclubes, mqtt
 
@@ -95,11 +96,12 @@ async def lifespan(app: FastAPI):
                     pass
 
         cfg = ConfiguracaoService(session)
-        prefixo = await cfg.obter("mqtt_topic_prefix", "Bal")
+        await cfg.definir("mqtt_topic_prefix", "Bal", descricao="Prefixo dos tópicos MQTT")
+        print("[startup] mqtt_topic_prefix definido como 'Bal'")
         result = await session.execute(select(Aeroclube).where(Aeroclube.topic_write.is_(None)))
         for ac in result.scalars().all():
-            ac.topic_write = f"{prefixo}/Write/{ac.nome}"
-            ac.topic_read = f"{prefixo}/Read/{ac.nome}"
+            ac.topic_write = f"Bal/Write/{ac.nome}"
+            ac.topic_read = f"Bal/Read/{ac.nome}"
             print(f"[startup] Tópicos gerados para {ac.nome}: Write={ac.topic_write} Read={ac.topic_read}")
         await session.commit()
 
@@ -114,7 +116,13 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(scheduler_balizamento())
     background_tasks.add(task)
     print("[startup] Scheduler criado", flush=True)
+    print("[startup] Iniciando listener heartbeat MQTT...", flush=True)
+    await mqtt_service.start_heartbeat_listener()
+    print("[startup] Iniciando listener Bal/Read MQTT...", flush=True)
+    await mqtt_service.start_bal_read_listener()
     yield
+    mqtt_service.stop_bal_read_listener()
+    mqtt_service.stop_heartbeat_listener()
     task.cancel()
     await task
 

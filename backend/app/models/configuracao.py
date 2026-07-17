@@ -34,6 +34,6 @@ class Configuracao(Base):
             "mqtt_broker_port": {"valor": "1883", "tipo": "int", "descricao": "Porta do broker MQTT"},
             "mqtt_username": {"valor": "", "tipo": "texto", "descricao": "Usuário MQTT"},
             "mqtt_password": {"valor": "", "tipo": "texto", "descricao": "Senha MQTT"},
-            "mqtt_topic_prefix": {"valor": "aeroclube", "tipo": "texto", "descricao": "Prefixo dos tópicos MQTT"},
+            "mqtt_topic_prefix": {"valor": "Bal", "tipo": "texto", "descricao": "Prefixo dos tópicos MQTT"},
             "mqtt_timeout_segundos": {"valor": "10", "tipo": "int", "descricao": "Timeout para confirmação MQTT (s)"},
         }

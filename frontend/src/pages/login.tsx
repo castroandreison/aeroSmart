@@ -12,7 +12,11 @@ export default function LoginPage() {
   const router = useRouter()
 
   if (user) {
-    router.push(user.nivel_acesso === 'administrador' ? '/admin/dashboard' : '/solicitante/dashboard')
+    router.push(
+      user.nivel_acesso === 'proprietario' ? '/admin/dashboard-proprietario' :
+      user.nivel_acesso === 'administrador' ? '/admin/dashboard' :
+      '/solicitante/dashboard'
+    )
     return null
   }
 

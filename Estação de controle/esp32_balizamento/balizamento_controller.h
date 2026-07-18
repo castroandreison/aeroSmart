@@ -669,7 +669,7 @@ void BalizamentoController::setup() {
     setenv("TZ", tz_buf, 1);
     tzset();
   }
-  ap_started_ = true; // AP gerenciado pelo YAML
+  startAP();
   if (strlen(saved_config_.wifi_ssid) > 0) {
     reconnectWiFi();
   }
@@ -1838,9 +1838,18 @@ void BalizamentoController::reconnectWiFi() {
 }
 
 void BalizamentoController::startAP() {
-  // AP gerenciado pelo ESPHome via YAML (ap_timeout: 0s)
-  ap_started_ = true;
-  ESP_LOGI(TAG, "AP AeroControl ativo (gerenciado pelo ESPHome)");
+  if (!ap_started_) {
+    ap_started_ = true;
+    esp_wifi_set_mode(WIFI_MODE_APSTA);
+    wifi_config_t ap_cfg = {};
+    strlcpy((char*)ap_cfg.ap.ssid, "AeroControl", sizeof(ap_cfg.ap.ssid));
+    strlcpy((char*)ap_cfg.ap.password, "123456789", sizeof(ap_cfg.ap.password));
+    ap_cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    ap_cfg.ap.ssid_len = 0;
+    ap_cfg.ap.max_connection = 4;
+    esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+    ESP_LOGI(TAG, "AP AeroControl ativo (192.168.4.1)");
+  }
 }
 
 // ==================== CALLBACKS DO YAML ====================

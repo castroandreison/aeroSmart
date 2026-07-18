@@ -10,6 +10,8 @@ export default function Home() {
     if (loading) return
     if (!user) {
       router.push('/login')
+    } else if (user.nivel_acesso === 'proprietario') {
+      router.push('/admin/dashboard-proprietario')
     } else if (user.nivel_acesso === 'administrador') {
       router.push('/admin/dashboard')
     } else {

@@ -14,8 +14,6 @@ esphome:
   friendly_name: Balizamento Pista
   includes:
     - balizamento_controller.h
-  libraries:
-    - "bblanchon/ArduinoJson@7.4.3"
   on_boot:
     priority: -100
     then:
@@ -34,7 +32,7 @@ wifi:
   ap:
     ssid: "AeroControl"
     password: !secret ap_password
-    ap_timeout: 0s
+    ap_timeout: 600s
   on_connect:
     - lambda: |-
         if (g_controller) g_controller->onWiFiConnected();

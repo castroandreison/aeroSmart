@@ -150,6 +150,8 @@ async def criar_agendamento(
     session: AsyncSession = Depends(get_session),
     current_user: Usuario = Depends(get_current_user),
 ):
+    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and data.aeroclube_id != current_user.aeroclube_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrador só pode agendar no seu próprio aeroclube")
     service = AgendamentoService(session)
     try:
         agendamento = await service.criar(data, current_user.id)
@@ -195,6 +197,8 @@ async def atualizar_agendamento(
     session: AsyncSession = Depends(get_session),
     current_user: Usuario = Depends(get_current_user),
 ):
+    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and data.aeroclube_id is not None and data.aeroclube_id != current_user.aeroclube_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrador só pode agendar no seu próprio aeroclube")
     service = AgendamentoService(session)
     try:
         agendamento = await service.atualizar(agendamento_id, data, current_user.id)

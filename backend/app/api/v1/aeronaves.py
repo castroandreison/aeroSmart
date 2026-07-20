@@ -84,12 +84,14 @@ async def criar_aeronave(
     session: AsyncSession = Depends(get_session),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and current_user.aeroclube_id:
+    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and current_user.aeroclube_id and data.usuario_id and data.usuario_id != current_user.id:
         user_result = await session.execute(select(Usuario).where(Usuario.id == data.usuario_id))
         dono = user_result.scalar_one_or_none()
         if not dono or dono.aeroclube_id != current_user.aeroclube_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você só pode criar aeronaves para usuários do seu aeroclube")
-    aeronave = Aeronave(**data.model_dump(), usuario_id=data.usuario_id or current_user.id)
+    aero_data = data.model_dump(exclude={'usuario_id'})
+    aero_data['usuario_id'] = data.usuario_id or current_user.id
+    aeronave = Aeronave(**aero_data)
     session.add(aeronave)
     await session.commit()
     await session.refresh(aeronave)
@@ -116,6 +118,11 @@ async def atualizar_aeronave(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
     elif aeronave.usuario_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
+    if data.usuario_id is not None and current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR:
+        novo_dono = await session.execute(select(Usuario).where(Usuario.id == data.usuario_id))
+        novo_dono = novo_dono.scalar_one_or_none()
+        if not novo_dono or (current_user.aeroclube_id and novo_dono.aeroclube_id != current_user.aeroclube_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você só pode atribuir aeronaves a usuários do seu aeroclube")
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(aeronave, key, value)
     await session.commit()

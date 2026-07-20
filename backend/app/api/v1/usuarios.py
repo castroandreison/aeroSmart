@@ -99,7 +99,7 @@ async def atualizar_usuario(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
     if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and current_user.aeroclube_id != usuario.aeroclube_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário não pertence ao seu aeroclube")
-    if data.nivel_acesso is not None:
+    if data.nivel_acesso is not None and current_user.id != usuario_id:
         if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and data.nivel_acesso != NivelAcesso.SOLICITANTE.value and data.nivel_acesso != usuario.nivel_acesso.value:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrador só pode alterar para solicitante")
         if current_user.nivel_acesso == NivelAcesso.PROPRIETARIO and data.nivel_acesso != NivelAcesso.ADMINISTRADOR.value and data.nivel_acesso != usuario.nivel_acesso.value:
@@ -147,8 +147,11 @@ async def excluir_usuario(
     usuario = await service.obter_por_id(usuario_id)
     if not usuario:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
-    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and current_user.aeroclube_id != usuario.aeroclube_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário não pertence ao seu aeroclube")
+    if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR:
+        if current_user.aeroclube_id != usuario.aeroclube_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário não pertence ao seu aeroclube")
+        if usuario.nivel_acesso != NivelAcesso.SOLICITANTE:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrador só pode excluir solicitantes")
     success = await service.excluir(usuario_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")

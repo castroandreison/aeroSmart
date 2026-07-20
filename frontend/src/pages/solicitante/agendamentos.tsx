@@ -14,11 +14,17 @@ export default function SolicitanteAgendamentos() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
 
+  const loadAeronaves = useCallback((aeroclube_id?: number) => {
+    const params: any = {}
+    if (aeroclube_id) params.aeroclube_id = aeroclube_id
+    AeronavesAPI.listar(params).then(setAeronaves).catch(() => {})
+  }, [])
+
   const load = useCallback(() => {
     AgendamentosAPI.listar(true).then(setAgendamentos).catch(() => {})
-    AeronavesAPI.listar().then(setAeronaves).catch(() => {})
+    loadAeronaves()
     AeroclubesAPI.listar().then(setAeroclubes).catch(() => {})
-  }, [])
+  }, [loadAeronaves])
 
   useEffect(() => {
     load()
@@ -73,18 +79,18 @@ export default function SolicitanteAgendamentos() {
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-white rounded-xl shadow-sm p-6 border mb-6">
+        <form onSubmit={handleCreate} className="bg-dark-800 border border-dark-700 rounded-xl p-6 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex gap-2">
               <div className="flex-1">
-                <label className="block text-sm font-medium mb-1">Dia</label>
+                <label className="block text-sm font-medium text-gray-400 mb-1">Dia</label>
                 <input type="number" min={1} max={31} value={form.data_dia} onChange={(e) => setForm({ ...form, data_dia: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" required placeholder="DD" />
+                  className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100" required placeholder="DD" />
               </div>
               <div className="flex-1">
-                <label className="block text-sm font-medium mb-1">Mês</label>
+                <label className="block text-sm font-medium text-gray-400 mb-1">Mês</label>
                 <select value={form.data_mes} onChange={(e) => setForm({ ...form, data_mes: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" required>
+                  className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100" required>
                   <option value="">Mês</option>
                   {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => (
                     <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
@@ -93,9 +99,9 @@ export default function SolicitanteAgendamentos() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Aeronave</label>
+              <label className="block text-sm font-medium text-gray-400 mb-1">Aeronave</label>
               <select value={form.aeronave_id} onChange={(e) => setForm({ ...form, aeronave_id: Number(e.target.value) })}
-                className="w-full px-3 py-2 border rounded-lg" required>
+                className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100" required>
                 <option value={0}>Selecione</option>
                 {aeronaves.map((a: any) => (
                   <option key={a.id} value={a.id}>{a.matricula} - {a.modelo}</option>
@@ -103,29 +109,31 @@ export default function SolicitanteAgendamentos() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Aeroclube</label>
-              <select value={form.aeroclube_id} onChange={(e) => setForm({ ...form, aeroclube_id: Number(e.target.value) })}
-                className="w-full px-3 py-2 border rounded-lg" required>
+              <label className="block text-sm font-medium text-gray-400 mb-1">Aeroclube</label>
+              <select value={form.aeroclube_id} onChange={(e) => { const id = Number(e.target.value); setForm({ ...form, aeroclube_id: id, aeronave_id: 0 }); loadAeronaves(id || undefined) }}
+                className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100" required>
                 <option value={0}>Selecione</option>
                 {aeroclubes.map((a: any) => (
                   <option key={a.id} value={a.id}>{a.nome}</option>
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Início</label>
-              <input type="time" value={form.hora_inicio} onChange={(e) => setForm({ ...form, hora_inicio: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Término</label>
-              <input type="time" value={form.hora_termino} onChange={(e) => setForm({ ...form, hora_termino: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" required />
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-400 mb-1">Início</label>
+                <input type="time" value={form.hora_inicio} onChange={(e) => setForm({ ...form, hora_inicio: e.target.value })}
+                  className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100" required />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-400 mb-1">Término</label>
+                <input type="time" value={form.hora_termino} onChange={(e) => setForm({ ...form, hora_termino: e.target.value })}
+                  className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100" required />
+              </div>
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium mb-1">Observações</label>
+              <label className="block text-sm font-medium text-gray-400 mb-1">Observações</label>
               <textarea value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" rows={2} />
+                className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100" rows={2} />
             </div>
           </div>
           <button type="submit" disabled={!form.aeronave_id || form.aeronave_id === 0 || !form.aeroclube_id || form.aeroclube_id === 0}
@@ -135,32 +143,32 @@ export default function SolicitanteAgendamentos() {
         </form>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      <div className="bg-dark-800 border border-dark-700 rounded-xl overflow-hidden">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="bg-dark-700">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Data/Hora</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Aeroclube</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Aeronave</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Status</th>
-              <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">Ações</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Data/Hora</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Aeroclube</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Aeronave</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Status</th>
+              <th className="text-right px-4 py-3 text-sm font-medium text-gray-400">Ações</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody className="divide-y divide-dark-700">
             {filteredAgendamentos.map((a: any) => (
-              <tr key={a.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3">{new Date(a.hora_inicio).toLocaleString('pt-BR')}</td>
-                <td className="px-4 py-3">{a.aeroclube_nome || '-'}</td>
-                <td className="px-4 py-3">{a.aeronave_matricula} - {a.aeronave_modelo}</td>
+              <tr key={a.id} className="hover:bg-dark-700/50">
+                <td className="px-4 py-3 text-gray-300">{new Date(a.hora_inicio).toLocaleString('pt-BR')}</td>
+                <td className="px-4 py-3 text-gray-300">{a.aeroclube_nome || '-'}</td>
+                <td className="px-4 py-3 text-gray-300">{a.aeronave_matricula} - {a.aeronave_modelo}</td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    a.status === 'agendado' ? 'bg-blue-100 text-blue-700' :
-                    a.status === 'confirmado' ? 'bg-blue-100 text-blue-700' :
-                    a.status === 'em_andamento' ? 'bg-green-100 text-green-700' :
-                    a.status === 'aguardando_encerramento' ? 'bg-yellow-100 text-yellow-700' :
-                    a.status === 'concluido' ? 'bg-green-100 text-green-700' :
-                    a.status === 'falha' ? 'bg-red-100 text-red-700' :
-                    'bg-red-100 text-red-700'
+                    a.status === 'agendado' ? 'bg-blue-900/50 text-blue-400' :
+                    a.status === 'confirmado' ? 'bg-blue-900/50 text-blue-400' :
+                    a.status === 'em_andamento' ? 'bg-green-900/50 text-green-400' :
+                    a.status === 'aguardando_encerramento' ? 'bg-yellow-900/50 text-yellow-400' :
+                    a.status === 'concluido' ? 'bg-green-900/50 text-green-400' :
+                    a.status === 'falha' ? 'bg-red-900/50 text-red-400' :
+                    'bg-red-900/50 text-red-400'
                   }`}>
                     {a.status === 'agendado' ? 'Agendado' :
                      a.status === 'confirmado' ? 'Confirmado' :
@@ -173,7 +181,7 @@ export default function SolicitanteAgendamentos() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   {a.status === 'agendado' && (
-                    <button onClick={() => handleCancel(a.id)} className="text-red-500 hover:text-red-700 text-sm">
+                    <button onClick={() => handleCancel(a.id)} className="text-red-400 hover:text-red-300 text-sm">
                       Cancelar
                     </button>
                   )}

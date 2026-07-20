@@ -58,6 +58,9 @@ async def dashboard_admin(
             return query.join(Usuario, Usuario.id == Agendamento.usuario_id).where(Usuario.aeroclube_id == current_user.aeroclube_id)
         return query
 
+    from datetime import datetime
+    agora = datetime.now()
+
     agendamentos_dia = await session.execute(
         _apply_ac_filter(select(func.count(Agendamento.id)).where(func.date(Agendamento.data) == func.current_date()))
     )
@@ -67,8 +70,6 @@ async def dashboard_admin(
             Agendamento.hora_inicio > agora,
         ))
     )
-    from datetime import datetime
-    agora = datetime.now()
     inicio_mes = agora.replace(day=1).date()
     fim_mes = datetime.now().date()
 

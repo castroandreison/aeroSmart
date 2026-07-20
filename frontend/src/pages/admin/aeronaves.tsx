@@ -38,13 +38,13 @@ export default function AdminAeronaves() {
   const handleSubmit = async (e: any) => {
     e.preventDefault()
     try {
+      const payload: any = { ...form }
+      if (payload.peso_maximo) { payload.peso_maximo = Number(payload.peso_maximo) } else { delete payload.peso_maximo }
       if (editingId) {
-        const payload: any = { ...form }
-        if (payload.peso_maximo) payload.peso_maximo = Number(payload.peso_maximo)
         await AeronavesAPI.atualizar(editingId, payload)
         toast.success('Aeronave atualizada!')
       } else {
-        await AeronavesAPI.criar(form)
+        await AeronavesAPI.criar(payload)
         toast.success('Aeronave criada!')
       }
       setShowForm(false)

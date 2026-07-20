@@ -42,6 +42,7 @@ export default function AdminDashboard() {
   const [ultimosComandos, setUltimosComandos] = useState<any[]>([])
   const [mqttConnected, setMqttConnected] = useState<boolean | null>(null)
   const [heartbeats, setHeartbeats] = useState<Record<string, any>>({})
+  const [lidos, setLidos] = useState<Set<number>>(new Set())
   const evtSource = useRef<EventSource | null>(null)
 
   useEffect(() => {
@@ -71,6 +72,13 @@ export default function AdminDashboard() {
 
   const hbEntries = Object.entries(heartbeats)
   const isOnline = hbEntries.some(([_, hb]) => hb.timestamp && (Date.now() - new Date(hb.timestamp).getTime()) < 8 * 60 * 1000)
+
+  const marcarLido = async (id: number) => {
+    try {
+      await MqttAPI.marcarLido(id)
+      setLidos((prev) => new Set(prev).add(id))
+    } catch {}
+  }
 
   const cards = [
     { label: 'Agendamentos Hoje', value: dashboard?.agendamentos_dia ?? '...', icon: Calendar, color: 'bg-neon-500/10 text-neon-400' },
@@ -167,10 +175,10 @@ export default function AdminDashboard() {
 
             {hbEntries.length > 0 && <hr className="border-dark-700" />}
 
-            {hbEntries.map(([name, hb]) => (
-              <div key={name} className="space-y-3 pt-2">
+            {(hbEntries.length > 0 ? hbEntries : [['', {}]]).map(([name, hb]: [string, any]) => (
+              <div key={name || 'placeholder'} className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-200">{hb.device?.nome || name}</span>
+                  <span className="text-sm font-medium text-gray-200">{hb.device?.nome || name || 'Carregando...'}</span>
                   <span className="text-xs text-gray-500">{hb.timestamp ? timeSince(hb.timestamp) : ''}</span>
                 </div>
 
@@ -183,16 +191,16 @@ export default function AdminDashboard() {
                     {hb.mqtt?.status === 'Conectado' ? (
                       <span className="flex items-center gap-1 text-green-400"><Wifi className="w-4 h-4" /> Comunicação OK</span>
                     ) : (
-                      <span className="flex items-center gap-1 text-red-400"><WifiOff className="w-4 h-4" /> Comunicação</span>
+                      <span className="flex items-center gap-1 text-gray-600"><Wifi className="w-4 h-4" /> Comunicação</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-gray-500" />
-                    <span className="text-gray-300">{formatUptime(hb.sistema?.uptime_segundos ?? 0)}</span>
+                    <span className="text-gray-300">{hb.sistema ? formatUptime(hb.sistema.uptime_segundos ?? 0) : '...'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <HardDrive className="w-4 h-4 text-gray-500" />
-                    <span className="text-gray-300" title={hb.firmware?.build_date || ''}>v{hb.firmware?.versao ?? '?'}</span>
+                    <span className="text-gray-300" title={hb.firmware?.build_date || ''}>{hb.firmware?.versao ? `v${hb.firmware.versao}` : '...'}</span>
                   </div>
                 </div>
 
@@ -258,7 +266,7 @@ export default function AdminDashboard() {
             {alertas.length === 0 ? (
               <p className="text-sm text-gray-500">Nenhum alerta</p>
             ) : (
-              alertas.slice(0, 10).map((a: any) => (
+              alertas.filter((a: any) => !lidos.has(a.id)).slice(0, 10).map((a: any) => (
                 <div key={a.id} className="flex items-start gap-3 p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
                   <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
@@ -266,6 +274,9 @@ export default function AdminDashboard() {
                     <p className="text-xs text-gray-400">{a.mensagem}</p>
                     <p className="text-xs text-gray-500 mt-1">{a.created_at ? new Date(a.created_at).toLocaleString('pt-BR') : ''}</p>
                   </div>
+                  <button onClick={() => marcarLido(a.id)} className="px-3 py-1 text-xs bg-red-700 text-white rounded hover:bg-red-600 transition">
+                    Lido
+                  </button>
                 </div>
               ))
             )}

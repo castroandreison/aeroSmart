@@ -44,6 +44,7 @@ const proprietarioNav = [
   { href: '/admin/relatorios', label: 'Relatórios', icon: FileText },
   { href: '/admin/energia', label: 'Energia', icon: Zap },
   { href: '/admin/logs', label: 'Logs', icon: Wifi },
+  { href: '/admin/mqtt-config', label: 'MQTT', icon: Radio },
 ]
 
 export default function Layout({ children, title }: LayoutProps) {
@@ -103,6 +104,7 @@ export default function Layout({ children, title }: LayoutProps) {
                     await UsuariosAPI.atualizar(user!.usuario_id, { nivel_acesso: novo })
                     updateUser({ nivel_acesso: novo })
                     toast.success(`Tipo alterado para ${novo}`)
+                    router.push('/')
                   } catch { toast.error('Erro ao alterar tipo') }
                 }}
                 className="text-xs bg-dark-800 border border-dark-600 rounded px-1 py-0.5 text-gray-300 capitalize cursor-pointer focus:outline-none focus:border-neon-500"

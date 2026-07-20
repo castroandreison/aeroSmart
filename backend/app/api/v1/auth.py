@@ -40,4 +40,5 @@ async def login(data: LoginRequest, session: AsyncSession = Depends(get_session)
         nome=usuario.nome_completo,
         email=usuario.email,
         nivel_acesso=usuario.nivel_acesso.value,
+        aeroclube_id=usuario.aeroclube_id,
     )

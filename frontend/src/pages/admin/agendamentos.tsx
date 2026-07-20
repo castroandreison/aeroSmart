@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import Layout from '@/components/Layout'
+import { useAuth } from '@/contexts/AuthContext'
 import { AgendamentosAPI, AeronavesAPI, AeroclubesAPI } from '@/services/api'
 import toast from 'react-hot-toast'
 
@@ -8,6 +9,8 @@ function hojeStr() {
 }
 
 export default function AdminAgendamentos() {
+  const { user } = useAuth()
+  const isAdmin = user?.nivel_acesso === 'administrador'
   const [agendamentos, setAgendamentos] = useState<any[]>([])
   const [aeronaves, setAeronaves] = useState<any[]>([])
   const [aeroclubes, setAeroclubes] = useState<any[]>([])
@@ -15,11 +18,17 @@ export default function AdminAgendamentos() {
   const [editId, setEditId] = useState<number | null>(null)
   const [form, setForm] = useState({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
 
+  const loadAeronaves = useCallback((aeroclube_id?: number) => {
+    const params: any = {}
+    if (aeroclube_id) params.aeroclube_id = aeroclube_id
+    AeronavesAPI.listar(params).then(setAeronaves).catch(() => {})
+  }, [])
+
   const load = useCallback(() => {
     AgendamentosAPI.listar(true).then(setAgendamentos).catch(() => {})
-    AeronavesAPI.listar().then(setAeronaves).catch(() => {})
+    loadAeronaves()
     AeroclubesAPI.listar().then(setAeroclubes).catch(() => {})
-  }, [])
+  }, [loadAeronaves])
 
   useEffect(() => {
     load()
@@ -35,7 +44,9 @@ export default function AdminAgendamentos() {
 
   const openCreate = () => {
     setEditId(null)
-    setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id: 0, observacoes: '' })
+    const aeroclube_id = isAdmin && user?.aeroclube_id ? user.aeroclube_id : 0
+    setForm({ data_dia: '', data_mes: '', hora_inicio: '', hora_termino: '', aeronave_id: 0, aeroclube_id, observacoes: '' })
+    if (aeroclube_id) loadAeronaves(aeroclube_id)
     setShowForm(true)
   }
 
@@ -134,23 +145,31 @@ export default function AdminAgendamentos() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-1">Aeroclube</label>
-              <select value={form.aeroclube_id} onChange={(e) => setForm({ ...form, aeroclube_id: Number(e.target.value) })}
-                className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required>
-                <option value={0} className="bg-dark-800">Selecione</option>
-                {aeroclubes.map((a: any) => (
-                  <option key={a.id} value={a.id} className="bg-dark-800">{a.nome}</option>
-                ))}
-              </select>
+              {isAdmin && user?.aeroclube_id ? (
+                <div className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-400 text-sm">
+                  {aeroclubes.find((a: any) => a.id === form.aeroclube_id)?.nome || 'Carregando...'}
+                </div>
+              ) : (
+                <select value={form.aeroclube_id} onChange={(e) => { const id = Number(e.target.value); setForm({ ...form, aeroclube_id: id, aeronave_id: 0 }); loadAeronaves(id || undefined) }}
+                  className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required>
+                  <option value={0} className="bg-dark-800">Selecione</option>
+                  {aeroclubes.map((a: any) => (
+                    <option key={a.id} value={a.id} className="bg-dark-800">{a.nome}</option>
+                  ))}
+                </select>
+              )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-1">Início</label>
-              <input type="time" value={form.hora_inicio} onChange={(e) => setForm({ ...form, hora_inicio: e.target.value })}
-                className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-1">Término</label>
-              <input type="time" value={form.hora_termino} onChange={(e) => setForm({ ...form, hora_termino: e.target.value })}
-                className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required />
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-400 mb-1">Início</label>
+                <input type="time" value={form.hora_inicio} onChange={(e) => setForm({ ...form, hora_inicio: e.target.value })}
+                  className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-400 mb-1">Término</label>
+                <input type="time" value={form.hora_termino} onChange={(e) => setForm({ ...form, hora_termino: e.target.value })}
+                  className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" required />
+              </div>
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-400 mb-1">Observações</label>

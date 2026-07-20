@@ -14,6 +14,7 @@ class TokenResponse(BaseModel):
     nome: str
     email: str
     nivel_acesso: str
+    aeroclube_id: Optional[int] = None
 
 
 class RecuperarSenhaRequest(BaseModel):

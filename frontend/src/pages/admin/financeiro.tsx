@@ -8,7 +8,26 @@ export default function AdminFinanceiro() {
   const [resumo, setResumo] = useState<any>(null)
   const [periodo, setPeriodo] = useState({ inicio: '', fim: '' })
 
-  useEffect(() => { FinanceiroAPI.listar().then(setFinanceiro).catch(() => {}) }, [])
+  const load = () => FinanceiroAPI.listar().then(setFinanceiro).catch(() => {})
+
+  useEffect(() => { load() }, [])
+
+  const gerarDados = async () => {
+    try {
+      const r = await FinanceiroAPI.gerarDadosTeste()
+      toast.success(`${r.agendamentos_passados} passados + ${r.agendamentos_futuros} futuros criados!`)
+      load()
+    } catch (err: any) { toast.error(err.response?.data?.detail || 'Erro ao gerar dados') }
+  }
+
+  const apagarDados = async () => {
+    if (!confirm('Apagar todos os dados de teste (agendamentos, acionamentos e financeiro)?')) return
+    try {
+      const r = await FinanceiroAPI.apagarDados()
+      toast.success(`${r.agendamentos} agendamentos apagados!`)
+      load()
+    } catch (err: any) { toast.error(err.response?.data?.detail || 'Erro ao apagar dados') }
+  }
 
   const loadResumo = async () => {
     if (!periodo.inicio || !periodo.fim) return
@@ -20,6 +39,15 @@ export default function AdminFinanceiro() {
 
   return (
     <Layout title="Financeiro">
+      <div className="flex justify-end gap-2 mb-4">
+        <button onClick={gerarDados} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition text-sm">
+          Gerar Dados de Teste
+        </button>
+        <button onClick={apagarDados} className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg transition text-sm">
+          Apagar Dados
+        </button>
+      </div>
+
       <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-sm p-6 mb-6">
         <h3 className="text-lg font-semibold text-white mb-4">Resumo do Período</h3>
         <div className="flex gap-4 mb-4">

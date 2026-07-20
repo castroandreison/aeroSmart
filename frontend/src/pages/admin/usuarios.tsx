@@ -128,7 +128,11 @@ export default function AdminUsuarios() {
               <label className="block text-sm font-medium text-gray-400 mb-1">Nível</label>
               <select value={form.nivel_acesso} onChange={(e) => setForm({ ...form, nivel_acesso: e.target.value })} className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100">
                 {isProprietario ? (
-                  <option value="administrador">Administrador</option>
+                  <>
+                    <option value="administrador">Administrador</option>
+                    <option value="solicitante">Solicitante</option>
+                    <option value="proprietario">Proprietário</option>
+                  </>
                 ) : (
                   <option value="solicitante">Solicitante</option>
                 )}

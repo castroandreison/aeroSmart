@@ -100,9 +100,9 @@ async def atualizar_usuario(
     if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and current_user.aeroclube_id != usuario.aeroclube_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário não pertence ao seu aeroclube")
     if data.nivel_acesso is not None:
-        if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and data.nivel_acesso != NivelAcesso.SOLICITANTE.value:
+        if current_user.nivel_acesso == NivelAcesso.ADMINISTRADOR and data.nivel_acesso != NivelAcesso.SOLICITANTE.value and data.nivel_acesso != usuario.nivel_acesso.value:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrador só pode alterar para solicitante")
-        if current_user.nivel_acesso == NivelAcesso.PROPRIETARIO and data.nivel_acesso != NivelAcesso.ADMINISTRADOR.value:
+        if current_user.nivel_acesso == NivelAcesso.PROPRIETARIO and data.nivel_acesso != NivelAcesso.ADMINISTRADOR.value and data.nivel_acesso != usuario.nivel_acesso.value:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Proprietário só pode alterar para administrador")
     usuario = await service.atualizar(usuario_id, data)
     return usuario

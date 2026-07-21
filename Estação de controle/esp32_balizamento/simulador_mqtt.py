@@ -5,11 +5,11 @@ import sys
 
 BROKER = "broker.emqx.io"
 PORT = 1883
-TOPIC_BAL_WRITE = "Bal/Write/AeroClub Central"
-TOPIC_BAL_READ = "Bal/Read/AeroClub Central"
-TOPIC_SDM_WRITE = "SDM120/Write/AeroClub Central"
-TOPIC_SDM_READ = "SDM120/Read/AeroClub Central"
-TOPIC_HEARTBEAT = "Heartbeat/AeroClub Central"
+TOPIC_BAL_WRITE = "Bal/Write/AeroClub Adm"
+TOPIC_BAL_READ = "Bal/Read/AeroClub Adm"
+TOPIC_SDM_WRITE = "SDM120/Write/AeroClub Adm"
+TOPIC_SDM_READ = "SDM120/Read/AeroClub Adm"
+TOPIC_HEARTBEAT = "Heartbeat/AeroClub Adm"
 FIRMWARE_URL = "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.ota.bin"
 
 def on_connect(client, userdata, flags, rc, *extra):

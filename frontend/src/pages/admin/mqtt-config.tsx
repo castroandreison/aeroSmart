@@ -47,11 +47,15 @@ export default function MqttConfig() {
     try {
       const ac = aeroclubes.find((a: any) => a.id === Number(testeAeroclubeId))
       const r = await api.post('/mqtt/testar-comando', {
-        ligar: testeComando === 'BalOn',
+        comando: testeComando,
         aeroclube_id: Number(testeAeroclubeId),
         aeroclube_nome: ac?.nome || 'Teste',
       })
-      toast.success(r.data.confirmado ? 'Comando confirmado!' : 'Comando enviado sem confirmação')
+      if (testeComando === 'Heartbeat') {
+        toast.success(r.data.confirmado ? 'Heartbeat recebido!' : 'Heartbeat sem resposta')
+      } else {
+        toast.success(r.data.confirmado ? 'Comando confirmado!' : 'Comando enviado sem confirmação')
+      }
       load()
     } catch (err: any) { toast.error(err.response?.data?.detail || 'Erro') }
     setTestando(false)
@@ -132,6 +136,7 @@ export default function MqttConfig() {
                 className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-gray-100">
                 <option value="BalOn">BalOn (Ligar)</option>
                 <option value="BalOff">BalOff (Desligar)</option>
+                <option value="Heartbeat">Heartbeat</option>
               </select>
             </div>
             <button type="button" onClick={testarComando} disabled={testando}

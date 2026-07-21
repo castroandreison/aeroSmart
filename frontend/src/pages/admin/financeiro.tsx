@@ -21,10 +21,10 @@ export default function AdminFinanceiro() {
   }
 
   const apagarDados = async () => {
-    if (!confirm('Apagar todos os dados de teste (agendamentos, acionamentos e financeiro)?')) return
+    if (!confirm('Apagar TODOS os agendamentos, acionamentos e financeiro? Esta ação é irreversível!')) return
     try {
       const r = await FinanceiroAPI.apagarDados()
-      toast.success(`${r.agendamentos} agendamentos apagados!`)
+      toast.success(`${r.financeiro} financeiro, ${r.acionamentos} acionamentos, ${r.agendamentos} agendamentos apagados!`)
       load()
     } catch (err: any) { toast.error(err.response?.data?.detail || 'Erro ao apagar dados') }
   }

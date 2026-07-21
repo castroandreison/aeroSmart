@@ -87,6 +87,7 @@ async def dashboard_admin(
             select(func.count(Usuario.id)).where(
                 Usuario.aeroclube_id == aeroclube_id,
                 Usuario.ativo == True,
+                Usuario.nivel_acesso == NivelAcesso.SOLICITANTE,
             )
         )
         usuarios_ativos = total_usuarios.scalar() or 0

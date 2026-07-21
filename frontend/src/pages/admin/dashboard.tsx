@@ -57,12 +57,14 @@ export default function AdminDashboard() {
       try { setPista(JSON.parse(e.data)) } catch {}
     }
 
-    const hbInterval = setInterval(async () => {
+    const fetchHeartbeat = async () => {
       try {
         const data = await MonitoramentoAPI.heartbeat()
         setHeartbeats(data)
       } catch {}
-    }, 10000)
+    }
+    fetchHeartbeat()
+    const hbInterval = setInterval(fetchHeartbeat, 10000)
 
     return () => {
       evtSource.current?.close()
@@ -84,7 +86,7 @@ export default function AdminDashboard() {
     { label: 'Agendamentos Hoje', value: dashboard?.agendamentos_dia ?? '...', icon: Calendar, color: 'bg-neon-500/10 text-neon-400' },
     { label: 'Agendamentos Futuros', value: dashboard?.agendamentos_futuros ?? '...', icon: Clock, color: 'bg-green-500/10 text-green-400' },
     { label: 'Concluídos', value: dashboard?.agendamentos_concluidos ?? '...', icon: Activity, color: 'bg-purple-500/10 text-purple-400' },
-    { label: 'Usuários Ativos', value: dashboard?.usuarios_ativos ?? '...', icon: Users, color: 'bg-blue-500/10 text-blue-400' },
+    { label: 'Usuários Cadastrados', value: dashboard?.usuarios_ativos ?? '...', icon: Users, color: 'bg-blue-500/10 text-blue-400' },
     { label: 'Horas de Utilização', value: `${dashboard?.horas_utilizacao ?? '...'}h`, icon: Plane, color: 'bg-orange-500/10 text-orange-400' },
     { label: 'Receita (mês)', value: `R$ ${dashboard?.receita?.toFixed(2) ?? '...'}`, icon: DollarSign, color: 'bg-green-500/10 text-green-400' },
     { label: 'Consumo (mês)', value: `${dashboard?.consumo_energia ?? '...'} kWh`, icon: Zap, color: 'bg-yellow-500/10 text-yellow-400' },
@@ -173,13 +175,15 @@ export default function AdminDashboard() {
               </p>
             )}
 
-            {hbEntries.length > 0 && <hr className="border-dark-700" />}
+            <hr className="border-dark-700 my-2" />
 
             {(hbEntries.length > 0 ? hbEntries : [['', {}]]).map(([name, hb]: [string, any]) => (
               <div key={name || 'placeholder'} className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-200">{hb.device?.nome || name || 'Carregando...'}</span>
-                  <span className="text-xs text-gray-500">{hb.timestamp ? timeSince(hb.timestamp) : ''}</span>
+                  <span className="text-sm font-medium text-gray-200">{hb.device?.nome || name || 'Aguardando...'}</span>
+                  <span className="text-xs text-gray-500">
+                    {hb.timestamp ? `${new Date(hb.timestamp).toLocaleString('pt-BR')} (${timeSince(hb.timestamp)})` : ''}
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -204,57 +208,43 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                {hb.firmware?.build_date && (
-                  <div className="text-xs text-gray-500">
-                    Build: {hb.firmware.build_date}
-                  </div>
-                )}
+                <div className="text-xs text-gray-500">
+                  Build: {hb.firmware?.build_date || '...'}
+                </div>
 
-                {hb.firmware?.ota_channel && (
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2 py-0.5 rounded bg-dark-800 text-gray-400 border border-dark-600">
-                      {hb.firmware.ota_channel}
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="px-2 py-0.5 rounded bg-dark-800 text-gray-400 border border-dark-600">
+                    {hb.firmware?.ota_channel || '...'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs text-gray-500">
+                  <span>IP: {hb.wifi?.ip || '-'}</span>
+                  <span>RSSI: {hb.wifi?.rssi ?? '-'} dBm</span>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm">
+                    <div className={`w-2 h-2 rounded-full ${hb.balizamento?.status === 'Ativo' ? 'bg-green-500' : 'bg-gray-500'}`} />
+                    <span className="text-gray-300">{hb.balizamento?.status === 'Ativo' ? 'Ativo' : 'Inativo'}</span>
+                    <span className="text-gray-500 text-xs">
+                      {hb.balizamento?.contador_acionamentos ?? 0} acionamentos
                     </span>
-                    {hb.firmware.ota_disponivel && (
-                      <span className="px-2 py-0.5 rounded bg-neon-500/10 text-neon-400 border border-neon-500/30">
-                        OTA disponível
-                      </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    {hb.balizamento?.modo_manual ? (
+                      <>
+                        <Settings className="w-4 h-4 text-yellow-400" />
+                        <span className="text-yellow-400 font-medium">Manual</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 text-neon-400" />
+                        <span className="text-neon-400 font-medium">Automático</span>
+                      </>
                     )}
                   </div>
-                )}
-
-                {hb.wifi && (
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
-                    <span>IP: {hb.wifi.ip || '-'}</span>
-                    <span>RSSI: {hb.wifi.rssi ?? '-'} dBm</span>
-                  </div>
-                )}
-
-                {hb.balizamento && (
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className={`w-2 h-2 rounded-full ${hb.balizamento.status === 'Ativo' ? 'bg-green-500' : 'bg-gray-500'}`} />
-                      <span className="text-gray-300">{hb.balizamento.status === 'Ativo' ? 'Ativo' : 'Inativo'}</span>
-                      <span className="text-gray-500 text-xs">
-                        {hb.balizamento.contador_acionamentos ?? 0} acionamentos
-                        {hb.balizamento.tempo_ligado_segundos > 0 && ` / ${formatUptime(hb.balizamento.tempo_ligado_segundos)} ligado`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      {hb.balizamento.modo_manual ? (
-                        <>
-                          <Settings className="w-4 h-4 text-yellow-400" />
-                          <span className="text-yellow-400 font-medium">Manual</span>
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="w-4 h-4 text-neon-400" />
-                          <span className="text-neon-400 font-medium">Automático</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
             ))}
           </div>

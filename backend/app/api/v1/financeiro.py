@@ -14,7 +14,7 @@ from app.models.agendamento import Agendamento, StatusAgendamento
 from app.models.acionamento import Acionamento
 from app.models.aeronave import Aeronave
 from app.core.timezone import SAO_PAULO_TZ
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 
 router = APIRouter(prefix="/financeiro", tags=["Financeiro"])
 
@@ -176,15 +176,18 @@ async def apagar_dados_teste(
     if current_user.nivel_acesso not in (NivelAcesso.PROPRIETARIO, NivelAcesso.ADMINISTRADOR):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
 
-    ag_ids = (await session.execute(select(Agendamento.id).where(Agendamento.observacoes.like("Teste%")))).scalars().all()
+    qtd_financeiro = (await session.execute(select(func.count(Financeiro.id)))).scalar()
+    qtd_acionamento = (await session.execute(select(func.count(Acionamento.id)))).scalar()
+    qtd_agendamentos = (await session.execute(select(func.count(Agendamento.id)))).scalar()
 
-    if ag_ids:
-        await session.execute(delete(Financeiro).where(Financeiro.agendamento_id.in_(ag_ids)))
-        await session.execute(delete(Acionamento).where(Acionamento.agendamento_id.in_(ag_ids)))
-        await session.execute(delete(Agendamento).where(Agendamento.id.in_(ag_ids)))
-        await session.commit()
+    await session.execute(delete(Financeiro))
+    await session.execute(delete(Acionamento))
+    await session.execute(delete(Agendamento))
+    await session.commit()
 
     return {
-        "message": "Dados de teste apagados com sucesso",
-        "agendamentos": len(ag_ids),
+        "message": "Todos os dados apagados com sucesso",
+        "financeiro": qtd_financeiro,
+        "acionamentos": qtd_acionamento,
+        "agendamentos": qtd_agendamentos,
     }

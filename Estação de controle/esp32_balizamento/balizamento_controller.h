@@ -13,6 +13,7 @@
 #include <esp_mac.h>
 #include <esp_http_server.h>
 #include <esp_http_client.h>
+#include <esp_crt_bundle.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <nvs_flash.h>
@@ -73,7 +74,7 @@ static std::string g_tuya_reg = TUYA_REGION;
 #define FIRMWARE_VERSION_URL "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/version.json"
 #endif
 #ifndef FIRMWARE_URL
-#define FIRMWARE_URL "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.ota.bin"
+#define FIRMWARE_URL "https://github.com/castroandreison/aeroSmart/raw/main/Esta%C3%A7%C3%A3o%20de%20controle/esp32_balizamento/firmware/latest.ota.bin"
 #endif
 #ifndef FIRMWARE_MD5_URL
 #define FIRMWARE_MD5_URL "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.md5"
@@ -1678,6 +1679,7 @@ void BalizamentoController::performOTA(const std::string &url) {
   cfg.url = url.c_str();
   cfg.timeout_ms = 30000;
   cfg.keep_alive_enable = false;
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   esp_err_t err = esp_http_client_open(client, 0);

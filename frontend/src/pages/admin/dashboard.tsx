@@ -3,6 +3,14 @@ import Layout from '@/components/Layout'
 import { MonitoramentoAPI, MqttAPI } from '@/services/api'
 import { Calendar, Plane, DollarSign, Zap, Users, Clock, Activity, Wifi, WifiOff, AlertTriangle, CheckCircle, XCircle, Signal, Cpu, HardDrive, Settings } from 'lucide-react'
 
+function formatHoras(dec: number): string {
+  const h = Math.floor(dec)
+  const m = Math.round((dec - h) * 60)
+  if (h === 0) return `${m}min`
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}min`
+}
+
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
@@ -42,6 +50,7 @@ export default function AdminDashboard() {
   const [ultimosComandos, setUltimosComandos] = useState<any[]>([])
   const [mqttConnected, setMqttConnected] = useState<boolean | null>(null)
   const [heartbeats, setHeartbeats] = useState<Record<string, any>>({})
+  const [lidos, setLidos] = useState<Set<number>>(new Set())
   const evtSource = useRef<EventSource | null>(null)
 
   useEffect(() => {
@@ -56,12 +65,14 @@ export default function AdminDashboard() {
       try { setPista(JSON.parse(e.data)) } catch {}
     }
 
-    const hbInterval = setInterval(async () => {
+    const fetchHeartbeat = async () => {
       try {
         const data = await MonitoramentoAPI.heartbeat()
         setHeartbeats(data)
       } catch {}
-    }, 10000)
+    }
+    fetchHeartbeat()
+    const hbInterval = setInterval(fetchHeartbeat, 10000)
 
     return () => {
       evtSource.current?.close()
@@ -72,12 +83,19 @@ export default function AdminDashboard() {
   const hbEntries = Object.entries(heartbeats)
   const isOnline = hbEntries.some(([_, hb]) => hb.timestamp && (Date.now() - new Date(hb.timestamp).getTime()) < 8 * 60 * 1000)
 
+  const marcarLido = async (id: number) => {
+    try {
+      await MqttAPI.marcarLido(id)
+      setLidos((prev) => new Set(prev).add(id))
+    } catch {}
+  }
+
   const cards = [
     { label: 'Agendamentos Hoje', value: dashboard?.agendamentos_dia ?? '...', icon: Calendar, color: 'bg-neon-500/10 text-neon-400' },
     { label: 'Agendamentos Futuros', value: dashboard?.agendamentos_futuros ?? '...', icon: Clock, color: 'bg-green-500/10 text-green-400' },
     { label: 'Concluídos', value: dashboard?.agendamentos_concluidos ?? '...', icon: Activity, color: 'bg-purple-500/10 text-purple-400' },
-    { label: 'Usuários Ativos', value: dashboard?.usuarios_ativos ?? '...', icon: Users, color: 'bg-blue-500/10 text-blue-400' },
-    { label: 'Horas de Utilização', value: `${dashboard?.horas_utilizacao ?? '...'}h`, icon: Plane, color: 'bg-orange-500/10 text-orange-400' },
+    { label: 'Usuários Cadastrados', value: dashboard?.usuarios_ativos ?? '...', icon: Users, color: 'bg-blue-500/10 text-blue-400' },
+    { label: 'Horas de Utilização', value: dashboard?.horas_utilizacao != null ? formatHoras(dashboard.horas_utilizacao) : '...', icon: Plane, color: 'bg-orange-500/10 text-orange-400' },
     { label: 'Receita (mês)', value: `R$ ${dashboard?.receita?.toFixed(2) ?? '...'}`, icon: DollarSign, color: 'bg-green-500/10 text-green-400' },
     { label: 'Consumo (mês)', value: `${dashboard?.consumo_energia ?? '...'} kWh`, icon: Zap, color: 'bg-yellow-500/10 text-yellow-400' },
   ]
@@ -165,13 +183,15 @@ export default function AdminDashboard() {
               </p>
             )}
 
-            {hbEntries.length > 0 && <hr className="border-dark-700" />}
+            <hr className="border-dark-700 my-2" />
 
-            {hbEntries.map(([name, hb]) => (
-              <div key={name} className="space-y-3 pt-2">
+            {(hbEntries.length > 0 ? hbEntries : [['', {}]]).map(([name, hb]: [string, any]) => (
+              <div key={name || 'placeholder'} className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-200">{hb.device?.nome || name}</span>
-                  <span className="text-xs text-gray-500">{hb.timestamp ? timeSince(hb.timestamp) : ''}</span>
+                  <span className="text-sm font-medium text-gray-200">{hb.device?.nome || name || 'Aguardando...'}</span>
+                  <span className="text-xs text-gray-500">
+                    {hb.timestamp ? `${new Date(hb.timestamp).toLocaleString('pt-BR')} (${timeSince(hb.timestamp)})` : ''}
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -183,70 +203,56 @@ export default function AdminDashboard() {
                     {hb.mqtt?.status === 'Conectado' ? (
                       <span className="flex items-center gap-1 text-green-400"><Wifi className="w-4 h-4" /> Comunicação OK</span>
                     ) : (
-                      <span className="flex items-center gap-1 text-red-400"><WifiOff className="w-4 h-4" /> Comunicação</span>
+                      <span className="flex items-center gap-1 text-gray-600"><Wifi className="w-4 h-4" /> Comunicação</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-gray-500" />
-                    <span className="text-gray-300">{formatUptime(hb.sistema?.uptime_segundos ?? 0)}</span>
+                    <span className="text-gray-300">{hb.sistema ? formatUptime(hb.sistema.uptime_segundos ?? 0) : '...'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <HardDrive className="w-4 h-4 text-gray-500" />
-                    <span className="text-gray-300" title={hb.firmware?.build_date || ''}>v{hb.firmware?.versao ?? '?'}</span>
+                    <span className="text-gray-300" title={hb.firmware?.build_date || ''}>{hb.firmware?.versao ? `v${hb.firmware.versao}` : '...'}</span>
                   </div>
                 </div>
 
-                {hb.firmware?.build_date && (
-                  <div className="text-xs text-gray-500">
-                    Build: {hb.firmware.build_date}
-                  </div>
-                )}
+                <div className="text-xs text-gray-500">
+                  Build: {hb.firmware?.build_date || '...'}
+                </div>
 
-                {hb.firmware?.ota_channel && (
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2 py-0.5 rounded bg-dark-800 text-gray-400 border border-dark-600">
-                      {hb.firmware.ota_channel}
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="px-2 py-0.5 rounded bg-dark-800 text-gray-400 border border-dark-600">
+                    {hb.firmware?.ota_channel || '...'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs text-gray-500">
+                  <span>IP: {hb.wifi?.ip || '-'}</span>
+                  <span>RSSI: {hb.wifi?.rssi ?? '-'} dBm</span>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm">
+                    <div className={`w-2 h-2 rounded-full ${hb.balizamento?.status === 'Ativo' ? 'bg-green-500' : 'bg-gray-500'}`} />
+                    <span className="text-gray-300">{hb.balizamento?.status === 'Ativo' ? 'Ativo' : 'Inativo'}</span>
+                    <span className="text-gray-500 text-xs">
+                      {hb.balizamento?.contador_acionamentos ?? 0} acionamentos
                     </span>
-                    {hb.firmware.ota_disponivel && (
-                      <span className="px-2 py-0.5 rounded bg-neon-500/10 text-neon-400 border border-neon-500/30">
-                        OTA disponível
-                      </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    {hb.balizamento?.modo_manual ? (
+                      <>
+                        <Settings className="w-4 h-4 text-yellow-400" />
+                        <span className="text-yellow-400 font-medium">Manual</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 text-neon-400" />
+                        <span className="text-neon-400 font-medium">Automático</span>
+                      </>
                     )}
                   </div>
-                )}
-
-                {hb.wifi && (
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
-                    <span>IP: {hb.wifi.ip || '-'}</span>
-                    <span>RSSI: {hb.wifi.rssi ?? '-'} dBm</span>
-                  </div>
-                )}
-
-                {hb.balizamento && (
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className={`w-2 h-2 rounded-full ${hb.balizamento.status === 'Ativo' ? 'bg-green-500' : 'bg-gray-500'}`} />
-                      <span className="text-gray-300">{hb.balizamento.status === 'Ativo' ? 'Ativo' : 'Inativo'}</span>
-                      <span className="text-gray-500 text-xs">
-                        {hb.balizamento.contador_acionamentos ?? 0} acionamentos
-                        {hb.balizamento.tempo_ligado_segundos > 0 && ` / ${formatUptime(hb.balizamento.tempo_ligado_segundos)} ligado`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      {hb.balizamento.modo_manual ? (
-                        <>
-                          <Settings className="w-4 h-4 text-yellow-400" />
-                          <span className="text-yellow-400 font-medium">Manual</span>
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="w-4 h-4 text-neon-400" />
-                          <span className="text-neon-400 font-medium">Automático</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
             ))}
           </div>
@@ -258,7 +264,7 @@ export default function AdminDashboard() {
             {alertas.length === 0 ? (
               <p className="text-sm text-gray-500">Nenhum alerta</p>
             ) : (
-              alertas.slice(0, 10).map((a: any) => (
+              alertas.filter((a: any) => !lidos.has(a.id)).slice(0, 10).map((a: any) => (
                 <div key={a.id} className="flex items-start gap-3 p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
                   <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
@@ -266,6 +272,9 @@ export default function AdminDashboard() {
                     <p className="text-xs text-gray-400">{a.mensagem}</p>
                     <p className="text-xs text-gray-500 mt-1">{a.created_at ? new Date(a.created_at).toLocaleString('pt-BR') : ''}</p>
                   </div>
+                  <button onClick={() => marcarLido(a.id)} className="px-3 py-1 text-xs bg-red-700 text-white rounded hover:bg-red-600 transition">
+                    Lido
+                  </button>
                 </div>
               ))
             )}

@@ -5,7 +5,7 @@ from datetime import datetime
 
 class UsuarioCreate(BaseModel):
     nome_completo: str
-    cpf: str
+    cpf: Optional[str] = None
     crea: Optional[str] = None
     empresa_operador: Optional[str] = None
     aeroclube_id: Optional[int] = None
@@ -38,11 +38,10 @@ class UsuarioUpdate(BaseModel):
 class UsuarioResponse(BaseModel):
     id: int
     nome_completo: str
-    cpf: str
+    cpf: Optional[str] = None
     crea: Optional[str] = None
     empresa_operador: Optional[str] = None
     aeroclube_id: Optional[int] = None
-    aeroclube: Optional[str] = None
     telefone: Optional[str] = None
     whatsapp: Optional[str] = None
     email: str

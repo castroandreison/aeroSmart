@@ -84,10 +84,10 @@ def gerar_pdf(titulo: str, usuario_nome: str, dados: dict, detalhes: list[dict] 
 
     resumo_data = [
         ["Indicador", "Valor"],
-        ["Voos", str(dados.get("total_voos", 0))],
+        ["Voos", str(dados.get("total_acionamentos", dados.get("total_voos", 0)))],
         ["Horas", f'{dados.get("total_horas", 0)}h'],
         ["Energia", f'{dados.get("total_energia_kwh", 0)} kWh'],
-        ["Valor Total", f'R$ {dados.get("total_gasto", 0):.2f}'],
+        ["Valor Total", f'R$ {dados.get("total_receita", dados.get("total_gasto", 0)):.2f}'],
     ]
     t1 = Table(resumo_data, colWidths=[120, 120])
     _estilo_tabela(t1, [120, 120])

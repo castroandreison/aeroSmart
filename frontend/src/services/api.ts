@@ -74,6 +74,7 @@ export const FinanceiroAPI = {
     api.get('/financeiro/resumo', { params: { data_inicio: dataInicio, data_fim: dataFim } }).then((r) => r.data),
   calcularCustos: (tempoMinutos: number) =>
     api.get('/financeiro/calcular-custos', { params: { tempo_minutos: tempoMinutos } }).then((r) => r.data),
+  apagarDados: () => api.delete('/financeiro/dados').then((r) => r.data),
 }
 
 export const MonitoramentoAPI = {

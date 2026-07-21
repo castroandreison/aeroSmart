@@ -65,18 +65,51 @@ async def testar_conexao(
 @router.post("/testar-comando")
 async def testar_comando(
     data: dict,
+    session: AsyncSession = Depends(get_session),
     current_user: Usuario = Depends(verificar_admin_ou_proprietario),
 ):
-    ligar = data.get("ligar", True)
+    comando = data.get("comando", "BalOn")
     aeroclube_id = data.get("aeroclube_id", 0)
     aeroclube_nome = data.get("aeroclube_nome", "Teste")
+
+    if comando == "Heartbeat":
+        try:
+            hb = await mqtt_service.request_heartbeat(aeroclube_id, aeroclube_nome, timeout=8)
+            from app.core.timezone import agora_sp
+            from app.models.log import Log
+            config = await mqtt_service.obter_config()
+            topic = f"{config['topic_prefix']}/Write/{aeroclube_nome}"
+            log = Log(
+                acao="publicar",
+                entidade="mqtt_comando",
+                entidade_id=aeroclube_id,
+                descricao=f"Heartbeat solicitado para {aeroclube_nome} {'OK' if hb else 'FALHA'}",
+                detalhes={
+                    "topic": topic,
+                    "payload": "RequestHeartbeat",
+                    "aeroclube_id": aeroclube_id,
+                    "aeroclube_nome": aeroclube_nome,
+                    "confirmado": hb is not None,
+                    "resposta": hb,
+                    "timestamp": agora_sp().isoformat() + "Z",
+                },
+            )
+            session.add(log)
+            await session.commit()
+            if hb:
+                return {"message": "Heartbeat recebido com sucesso", "confirmado": True, "heartbeat": hb}
+            return {"message": "Heartbeat solicitado, mas sem resposta", "confirmado": False}
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro MQTT: {e}")
+
+    ligar = comando == "BalOn"
     try:
-        ok = await mqtt_service.enviar_comando_balizador(aeroclube_id, aeroclube_nome, ligar)
+        ok = await mqtt_service.enviar_comando_balizador(aeroclube_id, aeroclube_nome, ligar, session=session)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro MQTT: {e}")
     if not ok:
-        return {"message": f"Comando {'BalOn' if ligar else 'BalOff'} enviado, mas sem confirmação", "confirmado": False}
-    return {"message": f"Comando {'BalOn' if ligar else 'BalOff'} confirmado", "confirmado": True}
+        return {"message": f"Comando {comando} enviado, mas sem confirmação", "confirmado": False}
+    return {"message": f"Comando {comando} confirmado", "confirmado": True}
 
 
 @router.get("/alertas")

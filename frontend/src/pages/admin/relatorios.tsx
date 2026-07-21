@@ -1,10 +1,13 @@
 import { useState, useEffect, useMemo } from 'react'
 import Layout from '@/components/Layout'
+import { useAuth } from '@/contexts/AuthContext'
 import { AeroclubesAPI, UsuariosAPI } from '@/services/api'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
 export default function AdminRelatorios() {
+  const { user } = useAuth()
+  const isAdmin = user?.nivel_acesso === 'administrador'
   const [periodo, setPeriodo] = useState({ inicio: '', fim: '' })
   const [usuarios, setUsuarios] = useState<any[]>([])
   const [usuarioSelecionado, setUsuarioSelecionado] = useState<any>(null)
@@ -15,9 +18,15 @@ export default function AdminRelatorios() {
   const [aeroclube, setAeroclube] = useState('')
 
   useEffect(() => {
-    AeroclubesAPI.listar().then(setAeroclubes).catch(() => {})
+    AeroclubesAPI.listar().then((aeroList) => {
+      setAeroclubes(aeroList)
+      if (isAdmin && user?.aeroclube_id) {
+        const aero = aeroList.find((a: any) => a.id === user.aeroclube_id)
+        if (aero) setAeroclube(aero.nome)
+      }
+    }).catch(() => {})
     UsuariosAPI.listar().then(setUsuarios).catch(() => {})
-  }, [])
+  }, [isAdmin, user?.aeroclube_id])
 
   const usuariosFiltrados = useMemo(() => {
     if (!busca) return usuarios
@@ -77,11 +86,17 @@ export default function AdminRelatorios() {
         <div className="bg-dark-900 border border-dark-700 rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold text-white mb-4">Relatório Mensal</h3>
           <div className="space-y-3">
-            <select value={aeroclube} onChange={(e) => setAeroclube(e.target.value)}
-              className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100">
-              <option value="">Todos os Aeroclubes</option>
-              {aeroclubes.map((a: any) => <option key={a.id} value={a.nome}>{a.nome}</option>)}
-            </select>
+            {isAdmin ? (
+              <div className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-400 text-sm">
+                {aeroclube || 'Carregando...'}
+              </div>
+            ) : (
+              <select value={aeroclube} onChange={(e) => setAeroclube(e.target.value)}
+                className="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100">
+                <option value="">Todos os Aeroclubes</option>
+                {aeroclubes.map((a: any) => <option key={a.id} value={a.nome}>{a.nome}</option>)}
+              </select>
+            )}
             <div className="flex gap-3">
               <input type="number" value={mes.ano} onChange={(e) => setMes({ ...mes, ano: Number(e.target.value) })}
                 className="w-1/2 px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-gray-100" placeholder="Ano" />

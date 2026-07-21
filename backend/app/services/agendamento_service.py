@@ -12,6 +12,7 @@ from app.models.aeronave import Aeronave
 from app.models.usuario import Usuario
 from app.schemas.agendamento import AgendamentoCreate, AgendamentoUpdate
 from app.services.configuracao_service import ConfiguracaoService
+from app.services.financeiro_service import FinanceiroService
 
 
 class AgendamentoService:
@@ -83,7 +84,7 @@ class AgendamentoService:
     async def obter_por_id(self, agendamento_id: int) -> Optional[Agendamento]:
         result = await self.session.execute(
             select(Agendamento)
-            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave), selectinload(Agendamento.aeroclube_rel))
+            .options(selectinload(Agendamento.solicitante), selectinload(Agendamento.aeronave), selectinload(Agendamento.aeroclube_rel), selectinload(Agendamento.acionamento), selectinload(Agendamento.financeiro))
             .where(Agendamento.id == agendamento_id)
         )
         return result.scalar_one_or_none()
@@ -176,13 +177,15 @@ class AgendamentoService:
         query = select(Agendamento).where(
             Agendamento.hora_termino < agora,
             Agendamento.status.notin_([StatusAgendamento.CONCLUIDO, StatusAgendamento.CANCELADO]),
-        )
+        ).options(selectinload(Agendamento.acionamento), selectinload(Agendamento.financeiro))
         result = await self.session.execute(query)
         agendamentos = list(result.scalars().all())
         for ag in agendamentos:
             ag.status = StatusAgendamento.CONCLUIDO
         if agendamentos:
             await self.session.commit()
+        for ag in agendamentos:
+            await self._criar_financeiro_se_necessario(ag)
         return len(agendamentos)
 
     async def cancelar(self, agendamento_id: int) -> bool:
@@ -232,13 +235,30 @@ class AgendamentoService:
         return agendamento
 
 
+    async def _criar_financeiro_se_necessario(self, agendamento: Agendamento) -> None:
+        if agendamento.financeiro:
+            return
+        if agendamento.acionamento and agendamento.acionamento.tempo_ligado_segundos:
+            tempo_min = agendamento.acionamento.tempo_ligado_segundos / 60
+        else:
+            diff = (agendamento.hora_termino - agendamento.hora_inicio).total_seconds()
+            tempo_min = max(diff / 60, 0)
+        if tempo_min <= 0:
+            return
+        financeiro_svc = FinanceiroService(self.session)
+        await financeiro_svc.registrar_financeiro(
+            agendamento.id, tempo_min, agendamento.aeroclube_id
+        )
+
     async def finalizar_agendamento(self, agendamento_id: int) -> Optional[Agendamento]:
         agendamento = await self.obter_por_id(agendamento_id)
         if not agendamento:
             return None
-        if agendamento.status in (StatusAgendamento.CONFIRMADO, StatusAgendamento.AGENDADO):
+        if agendamento.status in (StatusAgendamento.CONFIRMADO, StatusAgendamento.AGENDADO, StatusAgendamento.EM_ANDAMENTO):
             agendamento.status = StatusAgendamento.CONCLUIDO
             await self.session.commit()
+        if agendamento.status == StatusAgendamento.CONCLUIDO:
+            await self._criar_financeiro_se_necessario(agendamento)
             await self.session.refresh(agendamento)
         return agendamento
 

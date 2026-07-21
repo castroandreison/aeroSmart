@@ -6,6 +6,7 @@ interface User {
   nome: string
   email: string
   nivel_acesso: string
+  aeroclube_id?: number
 }
 
 interface AuthContextType {
@@ -43,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       nome: data.nome,
       email: data.email,
       nivel_acesso: data.nivel_acesso,
+      aeroclube_id: data.aeroclube_id,
     }))
     setToken(data.access_token)
     setUser({
@@ -50,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       nome: data.nome,
       email: data.email,
       nivel_acesso: data.nivel_acesso,
+      aeroclube_id: data.aeroclube_id,
     })
   }
 

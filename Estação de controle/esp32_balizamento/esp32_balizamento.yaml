@@ -5,9 +5,9 @@ substitutions:
   tuya_client_id: ""
   tuya_secret: ""
   tuya_region: "m2.tuyaeu.com"
-  firmware_url: "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.ota.bin"
-  firmware_version_url: "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/version.json"
-  firmware_md5_url: "https://gitlab.com/castroandreison/aerocontrol/-/raw/main/latest.md5"
+  firmware_url: "https://github.com/castroandreison/aeroSmart/raw/main/Esta%C3%A7%C3%A3o%20de%20controle/esp32_balizamento/firmware/latest.ota.bin"
+  firmware_version_url: "https://github.com/castroandreison/aeroSmart/raw/main/Esta%C3%A7%C3%A3o%20de%20controle/esp32_balizamento/firmware/version.json"
+  firmware_md5_url: "https://github.com/castroandreison/aeroSmart/raw/main/Esta%C3%A7%C3%A3o%20de%20controle/esp32_balizamento/firmware/latest.md5"
 
 esphome:
   name: balizamento-pista

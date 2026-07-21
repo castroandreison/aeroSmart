@@ -45,7 +45,7 @@ if defined DT (
 "{"
 "    ""min_esphome_version"": ""2026.6.5"","
 "    ""esp_platform"": ""ESP32"","
-"    ""version"": ""1.0.0"","
+"    ""version"": ""2.0.6"","
 "    ""build_time"": ""%TIMESTAMP%"","
 "    ""project"": ""AeroControl Balizamento""
 "}"

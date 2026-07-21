@@ -9,6 +9,7 @@ class AeronaveCreate(BaseModel):
     tipo: Optional[str] = None
     peso_maximo: Optional[float] = None
     operador: Optional[str] = None
+    usuario_id: Optional[int] = None
 
 
 class AeronaveUpdate(BaseModel):
@@ -18,6 +19,7 @@ class AeronaveUpdate(BaseModel):
     tipo: Optional[str] = None
     peso_maximo: Optional[float] = None
     operador: Optional[str] = None
+    usuario_id: Optional[int] = None
 
 
 class AeronaveResponse(BaseModel):

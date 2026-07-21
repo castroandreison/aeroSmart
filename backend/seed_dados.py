@@ -38,8 +38,13 @@ async def seed():
         if not ac3:
             ac3 = Aeroclube(nome="AeroClub Sul", topic_write="Bal/Write/AeroClub Sul", topic_read="Bal/Read/AeroClub Sul")
             session.add(ac3)
+
+        ac4 = await get_or_none(Aeroclube, nome="AeroClub Adm")
+        if not ac4:
+            ac4 = Aeroclube(nome="AeroClub Adm", topic_write="Bal/Write/AeroClub Adm", topic_read="Bal/Read/AeroClub Adm")
+            session.add(ac4)
         await session.commit()
-        for ac in (ac1, ac2, ac3):
+        for ac in (ac1, ac2, ac3, ac4):
             await session.refresh(ac)
 
         # --- USUARIOS ---
@@ -47,6 +52,7 @@ async def seed():
             ("Admin Geral", "11111111111", "admin@aeroclub.com", "admin123", NivelAcesso.PROPRIETARIO, ac1),
             ("Administrador Central", "22222222222", "adm.central@aeroclub.com", "adm123", NivelAcesso.ADMINISTRADOR, ac1),
             ("Administrador Norte", "33333333333", "adm.norte@aeroclub.com", "adm123", NivelAcesso.ADMINISTRADOR, ac2),
+            ("Administrador Adm", "33333333334", "adm.aeroclubadm@aeroclub.com", "adm123", NivelAcesso.ADMINISTRADOR, ac4),
             ("Carlos Silva", "44444444444", "carlos@aeroclub.com", "123456", NivelAcesso.SOLICITANTE, ac1),
             ("Maria Souza", "55555555555", "maria@aeroclub.com", "123456", NivelAcesso.SOLICITANTE, ac1),
             ("João Pereira", "66666666666", "joao@aeroclub.com", "123456", NivelAcesso.SOLICITANTE, ac1),
@@ -174,7 +180,7 @@ async def seed():
         print("Seed concluído com sucesso!")
         print("=" * 50)
         print()
-        print("Aeroclubes:", [ac.nome for ac in (ac1, ac2, ac3)])
+        print("Aeroclubes:", [ac.nome for ac in (ac1, ac2, ac3, ac4)])
         print("Usuários:")
         for u in usuarios:
             nivel = u.nivel_acesso.value

@@ -7,6 +7,10 @@ class FinanceiroResponse(BaseModel):
     id: int
     agendamento_id: int
     tempo_ligado_minutos: Optional[float] = None
+    data: Optional[datetime] = None
+    hora_inicio: Optional[datetime] = None
+    hora_termino: Optional[datetime] = None
+    duracao_minutos: Optional[float] = None
     energia_consumida_kwh: Optional[float] = None
     valor_energia: Optional[float] = None
     valor_acionamento: Optional[float] = None
@@ -24,6 +28,9 @@ class FinanceiroResumo(BaseModel):
     total_custos: float
     total_energia_kwh: float
     total_horas: float
+    total_duracao_minutos: float = 0
+    total_valor_energia: float = 0
+    total_valor_acionamento: float = 0
     total_acionamentos: int
     periodo_inicio: Optional[datetime] = None
     periodo_fim: Optional[datetime] = None

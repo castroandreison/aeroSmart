@@ -39,8 +39,8 @@ class FinanceiroService:
             "valor_total": round(valor_total, 2),
         }
 
-    async def registrar_financeiro(self, agendamento_id: int, tempo_ligado_minutos: float) -> Financeiro:
-        custos = await self.calcular_custos(tempo_ligado_minutos)
+    async def registrar_financeiro(self, agendamento_id: int, tempo_ligado_minutos: float, aeroclube_id: int = None) -> Financeiro:
+        custos = await self.calcular_custos(tempo_ligado_minutos, aeroclube_id=aeroclube_id)
         financeiro = Financeiro(
             agendamento_id=agendamento_id,
             **custos,
@@ -60,6 +60,8 @@ class FinanceiroService:
             func.coalesce(func.sum(Financeiro.valor_total), 0),
             func.coalesce(func.sum(Financeiro.energia_consumida_kwh), 0),
             func.coalesce(func.sum(Financeiro.tempo_ligado_minutos), 0),
+            func.coalesce(func.sum(Financeiro.valor_energia), 0),
+            func.coalesce(func.sum(Financeiro.valor_acionamento), 0),
         ).join(Agendamento).join(Usuario, Usuario.id == Agendamento.usuario_id).where(
             and_(
                 Agendamento.data >= datetime.combine(data_inicio, datetime.min.time()),
@@ -71,11 +73,16 @@ class FinanceiroService:
             query = query.join(Aeroclube, Aeroclube.id == Usuario.aeroclube_id).where(Aeroclube.nome == aeroclube)
         result = await self.session.execute(query)
         row = result.one()
+        duracao_min = float(row[3] or 0)
         return {
-            "total_voos": row[0] or 0,
-            "total_gasto": float(row[1] or 0),
+            "total_acionamentos": row[0] or 0,
+            "total_receita": float(row[1] or 0),
             "total_energia_kwh": float(row[2] or 0),
-            "total_horas": float((row[3] or 0) / 60),
+            "total_horas": duracao_min / 60,
+            "total_duracao_minutos": duracao_min,
+            "total_valor_energia": float(row[4] or 0),
+            "total_valor_acionamento": float(row[5] or 0),
+            "total_custos": 0.0,
             "periodo_inicio": data_inicio,
             "periodo_fim": data_fim,
         }

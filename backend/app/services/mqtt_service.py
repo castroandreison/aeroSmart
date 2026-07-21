@@ -6,6 +6,7 @@ from typing import Optional
 import paho.mqtt.client as mqtt
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session_factory
 from app.services.configuracao_service import ConfiguracaoService
@@ -14,6 +15,7 @@ from app.models.log import Log
 from app.models.agendamento import Agendamento, StatusAgendamento
 from app.models.acionamento import Acionamento
 from app.models.aeroclube import Aeroclube
+from app.models.financeiro import Financeiro
 from app.core.timezone import agora_sp
 
 
@@ -529,12 +531,33 @@ class MqttService:
                 ).total_seconds()
                 acionamento.status = "desligado"
 
+            ag_result = await session.execute(
+                select(Agendamento).where(Agendamento.id == ag_id).options(
+                    selectinload(Agendamento.acionamento),
+                    selectinload(Agendamento.financeiro)
+                )
+            )
+            ag = ag_result.scalar_one_or_none()
+
             await session.execute(
                 update(Agendamento)
                 .where(Agendamento.id == ag_id)
                 .values(status=StatusAgendamento.CONCLUIDO, updated_at=now)
             )
             await session.commit()
+
+            if ag and not ag.financeiro:
+                from app.services.financeiro_service import FinanceiroService
+                financeiro_svc = FinanceiroService(session)
+                ac = ag.acionamento
+                if ac and ac.tempo_ligado_segundos:
+                    tempo_min = ac.tempo_ligado_segundos / 60
+                else:
+                    diff = (ag.hora_termino - ag.hora_inicio).total_seconds()
+                    tempo_min = max(diff / 60, 0)
+                if tempo_min > 0:
+                    await financeiro_svc.registrar_financeiro(ag.id, tempo_min, ag.aeroclube_id)
+
             print(f"[MQTT BalRead] Agendamento {ag_id} finalizado")
 
     async def _finalizar_agendamento_estacao(self, session, station_name, comando, payload):
@@ -581,6 +604,20 @@ class MqttService:
                 .values(status=StatusAgendamento.CONCLUIDO, updated_at=now)
             )
             await session.commit()
+
+            from app.services.financeiro_service import FinanceiroService
+            financeiro_svc = FinanceiroService(session)
+            fin_result = await session.execute(select(Financeiro).where(Financeiro.agendamento_id == ag.id))
+            if not fin_result.scalar_one_or_none():
+                ac = acionamento
+                if ac and ac.tempo_ligado_segundos:
+                    tempo_min = ac.tempo_ligado_segundos / 60
+                else:
+                    diff = (ag.hora_termino - ag.hora_inicio).total_seconds()
+                    tempo_min = max(diff / 60, 0)
+                if tempo_min > 0:
+                    await financeiro_svc.registrar_financeiro(ag.id, tempo_min, ag.aeroclube_id)
+
             print(f"[MQTT BalRead] Estacao {station_name} desligada via {comando}, agendamento {ag.id} concluido")
         except Exception as e:
             print(f"[MQTT BalRead] Erro finalizar estacao {station_name}: {type(e).__name__}: {e}")

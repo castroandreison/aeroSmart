@@ -58,20 +58,21 @@ async def dashboard_admin(
             return query.join(Usuario, Usuario.id == Agendamento.usuario_id).where(Usuario.aeroclube_id == current_user.aeroclube_id)
         return query
 
-    from datetime import datetime
-    agora = datetime.now()
+    from app.core.timezone import agora_sp
+    agora = agora_sp()
 
     agendamentos_dia = await session.execute(
         _apply_ac_filter(select(func.count(Agendamento.id)).where(func.date(Agendamento.data) == func.current_date()))
     )
     agendamentos_futuros = await session.execute(
         _apply_ac_filter(select(func.count(Agendamento.id)).where(
-            Agendamento.status.in_([StatusAgendamento.AGENDADO, StatusAgendamento.CONFIRMADO]),
+            Agendamento.status != StatusAgendamento.CONCLUIDO,
+            Agendamento.status != StatusAgendamento.CANCELADO,
             Agendamento.hora_inicio > agora,
         ))
     )
     inicio_mes = agora.replace(day=1).date()
-    fim_mes = datetime.now().date()
+    fim_mes = agora.date()
 
     agendamentos_concluidos = await session.execute(
         _apply_ac_filter(select(func.count(Agendamento.id)).where(
@@ -105,8 +106,8 @@ async def dashboard_admin(
         usuarios_ativos=usuarios_ativos,
         horas_utilizacao=resumo["total_horas"],
         consumo_energia=resumo["total_energia_kwh"],
-        receita=resumo["total_gasto"],
-        numero_acionamentos=resumo["total_voos"],
+        receita=resumo["total_receita"],
+        numero_acionamentos=resumo["total_acionamentos"],
     )
 
 

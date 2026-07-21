@@ -76,15 +76,14 @@ async def finalizar_baloff(
     session: AsyncSession = Depends(get_session),
     admin: Usuario = Depends(verificar_admin_ou_proprietario),
 ):
-    """Atualiza status do agendamento para CONCLUIDO quando recebe confirmação MQTT do BalOff"""
+    """Atualiza status do agendamento para CONCLUIDO e cria registro financeiro"""
     service = AgendamentoService(session)
-    agendamento = await service.obter_por_id(agendamento_id)
-    if not agendamento:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado")
     if confirmado:
-        agendamento.status = StatusAgendamento.CONCLUIDO
-    await session.commit()
-    return {"message": "Agendamento concluído", "status": agendamento.status.value}
+        agendamento = await service.finalizar_agendamento(agendamento_id)
+        if not agendamento:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado")
+        return {"message": "Agendamento concluído", "status": agendamento.status.value}
+    return {"message": "Nada alterado"}
 
 
 @router.get("/controladores")

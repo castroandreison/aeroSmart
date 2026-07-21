@@ -3,6 +3,14 @@ import Layout from '@/components/Layout'
 import { MonitoramentoAPI, MqttAPI } from '@/services/api'
 import { Calendar, Plane, DollarSign, Zap, Users, Clock, Activity, Wifi, WifiOff, AlertTriangle, CheckCircle, XCircle, Signal, Cpu, HardDrive, Settings } from 'lucide-react'
 
+function formatHoras(dec: number): string {
+  const h = Math.floor(dec)
+  const m = Math.round((dec - h) * 60)
+  if (h === 0) return `${m}min`
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}min`
+}
+
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
@@ -87,7 +95,7 @@ export default function AdminDashboard() {
     { label: 'Agendamentos Futuros', value: dashboard?.agendamentos_futuros ?? '...', icon: Clock, color: 'bg-green-500/10 text-green-400' },
     { label: 'Concluídos', value: dashboard?.agendamentos_concluidos ?? '...', icon: Activity, color: 'bg-purple-500/10 text-purple-400' },
     { label: 'Usuários Cadastrados', value: dashboard?.usuarios_ativos ?? '...', icon: Users, color: 'bg-blue-500/10 text-blue-400' },
-    { label: 'Horas de Utilização', value: `${dashboard?.horas_utilizacao ?? '...'}h`, icon: Plane, color: 'bg-orange-500/10 text-orange-400' },
+    { label: 'Horas de Utilização', value: dashboard?.horas_utilizacao != null ? formatHoras(dashboard.horas_utilizacao) : '...', icon: Plane, color: 'bg-orange-500/10 text-orange-400' },
     { label: 'Receita (mês)', value: `R$ ${dashboard?.receita?.toFixed(2) ?? '...'}`, icon: DollarSign, color: 'bg-green-500/10 text-green-400' },
     { label: 'Consumo (mês)', value: `${dashboard?.consumo_energia ?? '...'} kWh`, icon: Zap, color: 'bg-yellow-500/10 text-yellow-400' },
   ]
